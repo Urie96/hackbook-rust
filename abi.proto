@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package abi;
+
+message Course {
+  uint32 articleCount = 1;
+  string brief = 2;
+  bool done = 3;
+  string id = 4;
+  string image = 5;
+  uint32 price = 6;
+  string purchasedCount = 7;
+  string teacherName = 8;
+  string teacherTitle = 9;
+  string title = 10;
+  repeated Section sections = 11;
+  string description = 12;
+}
+
+message CourseList {
+  repeated Course courses = 1;
+}
+
+message Section {
+  string id = 1;
+  string title = 2;
+  repeated Article articles = 3;
+}
+
+message SectionList {
+  repeated Section sections = 1;
+}
+
+message Article {
+  string id = 1;
+  string title = 2;
+  string publishDate = 3;
+  bool done = 4;
+  string content = 5;
+  Course course = 6;
+  Section section = 7;
+}
+
+message ArticleList {
+  repeated Article articles = 1;
+}
+
+message Comment {
+  string content = 1;
+  uint32 likeCount = 2;
+  string nickName = 3;
+  repeated Comment replies = 4;
+}
+
+message CommentList {
+  repeated Comment comments = 4;
+}
+
+message UserInfo {
+  string id = 1;
+  UserRole role = 2;
+}
+
+enum UserRole {
+    Visitor = 0;
+    Reader = 1;
+}
