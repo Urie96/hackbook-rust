@@ -9,6 +9,7 @@ use {
     ory_kratos_client::apis::{configuration::Configuration, v0alpha2_api::to_session},
     serde::{Deserialize, Serialize},
     std::{
+        env,
         future::{ready, Ready},
         time::Instant,
     },
@@ -166,6 +167,20 @@ pub async fn login(
     repo: web::Data<Repo>,
     query: web::Query<LoginQuery>,
 ) -> actix_web::Result<HttpResponse> {
+    let success = HttpResponse::TemporaryRedirect()
+        .insert_header(("location", query.return_to.as_str()))
+        .finish();
+    let failure = HttpResponse::TemporaryRedirect()
+        .insert_header((
+            "location",
+            format!(
+                "{}/self-service/login/browser?aal=&refresh=&return_to={}",
+                env::var("SSO").unwrap_or("https://sso.lubui.com".to_string()),
+                query.return_to
+            ),
+        ))
+        .finish();
+
     let mut config = Configuration::new();
     config.base_path = "https://sso.lubui.com".to_owned();
     match to_session(
@@ -182,23 +197,11 @@ pub async fn login(
                 role: get_user_role(repo.as_ref(), user_id.as_ref()),
             };
             id.remember(serde_json::to_string(&user).unwrap());
-            // Ok(HttpResponse::Ok().finish())
-            Ok(HttpResponse::TemporaryRedirect()
-                .insert_header(("location", query.return_to.as_str()))
-                .finish())
+            Ok(success)
         }
         Err(e) => {
-            error!("{:?}", e);
-            Ok(HttpResponse::TemporaryRedirect()
-                .insert_header((
-                    "location",
-                    format!(
-                        // "https://sso.lubui.com/self-service/login/browser?aal=&refresh=&return_to={}",
-                        "http://abc.lubui.com/sso/self-service/login/browser?aal=&refresh=&return_to={}",
-                        query.return_to
-                    ),
-                ))
-                .finish())
+            error!("11, {:?}", e);
+            Ok(failure)
         }
     }
 }

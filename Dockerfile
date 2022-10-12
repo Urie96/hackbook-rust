@@ -5,7 +5,7 @@ RUN cargo new --bin hackbook-server \
     && sed -i "s@http://deb.debian.org/debian@https://mirrors.tuna.tsinghua.edu.cn/debian/@g" /etc/apt/sources.list \
     && apt update \
     && apt install -y libssl-dev pkg-config default-libmysqlclient-dev
-     
+
 WORKDIR /hackbook-server
 COPY ./.cargo ./.cargo
 COPY ./Cargo.lock ./Cargo.lock
@@ -21,7 +21,8 @@ FROM debian:buster-slim
 RUN sed -i "s@http://deb.debian.org/debian-security@http://mirrors.tuna.tsinghua.edu.cn/debian-security@g" /etc/apt/sources.list \
     && sed -i "s@http://deb.debian.org/debian@http://mirrors.tuna.tsinghua.edu.cn/debian/@g" /etc/apt/sources.list \
     && apt update \
-    && apt install -y libssl-dev default-libmysqlclient-dev
+    && apt install -y libssl-dev default-libmysqlclient-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/* 
 
 COPY --from=builder /hackbook-server/target/release/hackbook-server .
 

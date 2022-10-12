@@ -8,7 +8,7 @@ use {
     },
     dotenvy::dotenv,
     log::*,
-    std::sync::Arc,
+    std::{env, sync::Arc},
     time::Duration,
 };
 
@@ -33,7 +33,12 @@ async fn main() -> std::io::Result<()> {
 
     let domain: String = std::env::var("DOMAIN").unwrap_or_else(|_| "localhost".to_string());
 
-    info!("starting HTTP server at http://localhost:8080");
+    let host = env::var("HOST").unwrap_or("127.0.0.1".to_string());
+    let port: u16 = env::var("PORT")
+        .unwrap_or("8080".to_string())
+        .parse()
+        .unwrap();
+    info!("starting HTTP server at http://{}:{}", host, port);
     // Start HTTP server
     HttpServer::new(move || {
         App::new()
@@ -56,7 +61,7 @@ async fn main() -> std::io::Result<()> {
             .service(handlers::login)
             .service(handlers::get_me)
     })
-    .bind(("0.0.0.0", 8080))?
+    .bind((host, port))?
     .run()
     .await
 }
