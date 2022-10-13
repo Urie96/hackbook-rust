@@ -3,9 +3,8 @@
 setup:
 	diesel setup
 	diesel migration generate create_article
-
-migration:
 	diesel migration run
+	rm -rf ./migrations
 
 pb:
 	cargo run --bin proto

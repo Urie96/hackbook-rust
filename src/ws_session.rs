@@ -149,6 +149,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                                     .send(ws_server::GetArticleDetail {
                                         article_id: v[1].to_owned(),
                                         session_id: self.id,
+                                        user_id: self.user_id.to_owned(),
                                     })
                                     .into_actor(self)
                                     .then(|res, _act, ctx| {

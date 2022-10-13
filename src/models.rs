@@ -1,8 +1,9 @@
 use {
     crate::schema::{
         article, article_comment, article_content, course, course_description, section, user_role,
+        user_study_info,
     },
-    diesel::prelude::{Associations, Identifiable, Queryable},
+    diesel::prelude::{Associations, Identifiable, Insertable, Queryable, QueryableByName},
 };
 
 #[derive(Identifiable, Debug, Queryable, Associations)]
@@ -27,15 +28,19 @@ pub struct Section {
     pub title: String,
 }
 
-#[derive(Identifiable, Debug, Queryable)]
+#[derive(Identifiable, Debug, Queryable, QueryableByName)]
 #[diesel(table_name = course)]
 pub struct Course {
     pub id: String,
     pub brief: String,
+    #[diesel(column_name = teacherName)]
     pub teacher_name: String,
+    #[diesel(column_name = teacherTitle)]
     pub teacher_title: String,
     pub image: String,
+    #[diesel(column_name = articleCount)]
     pub article_count: i32,
+    #[diesel(column_name = purchasedCount)]
     pub purchased_count: String,
     pub done: i8,
     pub price: i32,
@@ -84,4 +89,15 @@ pub struct UserRole {
     pub created_at: u64,
     pub valid_before: u64,
     pub id: u64,
+}
+
+#[derive(Identifiable, Debug, Queryable, Insertable)]
+#[diesel(table_name = user_study_info)]
+pub struct UserStudyInfo {
+    pub id: u32,
+    pub course_id: String,
+    pub article_id: String,
+    pub last_study_at: u64,
+    pub study_percent: u16,
+    pub user_id: String,
 }

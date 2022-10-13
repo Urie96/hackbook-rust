@@ -24,6 +24,15 @@ pub struct Course {
     pub sections: ::prost::alloc::vec::Vec<Section>,
     #[prost(string, tag="12")]
     pub description: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="13")]
+    pub study_info: ::core::option::Option<StudyInfo>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StudyInfo {
+    #[prost(uint32, tag="1")]
+    pub percent: u32,
+    #[prost(uint64, tag="2")]
+    pub last_study_at: u64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CourseList {
@@ -60,6 +69,8 @@ pub struct Article {
     pub course: ::core::option::Option<Course>,
     #[prost(message, optional, tag="7")]
     pub section: ::core::option::Option<Section>,
+    #[prost(message, optional, tag="8")]
+    pub study_info: ::core::option::Option<StudyInfo>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ArticleList {
@@ -79,7 +90,7 @@ pub struct Comment {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CommentList {
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag="1")]
     pub comments: ::prost::alloc::vec::Vec<Comment>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -88,6 +99,29 @@ pub struct UserInfo {
     pub id: ::prost::alloc::string::String,
     #[prost(enumeration="UserRole", tag="2")]
     pub role: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SaveStudyInfoRequest {
+    #[prost(string, tag="1")]
+    pub article_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub course_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag="3")]
+    pub percent: u32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ArticleStudyInfo {
+    #[prost(string, tag="1")]
+    pub article_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag="2")]
+    pub percent: u32,
+    #[prost(uint64, tag="3")]
+    pub last_study_at: u64,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetArticleStudyInfoResponse {
+    #[prost(message, repeated, tag="1")]
+    pub article_study_infos: ::prost::alloc::vec::Vec<ArticleStudyInfo>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

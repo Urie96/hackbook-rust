@@ -68,11 +68,24 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    user_study_info (id) {
+        id -> Unsigned<Integer>,
+        course_id -> Varchar,
+        article_id -> Varchar,
+        last_study_at -> Unsigned<Bigint>,
+        study_percent -> Unsigned<Smallint>,
+        user_id -> Varchar,
+    }
+}
+
 diesel::joinable!(article -> section (sectionId));
 diesel::joinable!(article_comment -> article (articleId));
 diesel::joinable!(article_content -> article (articleId));
 diesel::joinable!(course_description -> course (courseId));
 diesel::joinable!(section -> course (courseId));
+diesel::joinable!(user_study_info -> article (article_id));
+diesel::joinable!(user_study_info -> course (course_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     article,
@@ -82,4 +95,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     course_description,
     section,
     user_role,
+    user_study_info,
 );

@@ -1,5 +1,5 @@
 use {
-    crate::{pb::Article, repo::Repo},
+    crate::{pb, repo::Repo},
     actix::prelude::*,
     actix_web_actors::ws::CloseReason,
     anyhow::Result,
@@ -32,10 +32,11 @@ pub struct Disconnect {
 
 /// Session is disconnected
 #[derive(Message)]
-#[rtype(result = "Result<Article>")]
+#[rtype(result = "Result<pb::Article>")]
 pub struct GetArticleDetail {
     pub article_id: String,
     pub session_id: usize,
+    pub user_id: String,
 }
 
 #[derive(Debug)]
@@ -119,7 +120,7 @@ impl Handler<Disconnect> for WsServer {
 
 /// Handler for Disconnect message.
 impl Handler<GetArticleDetail> for WsServer {
-    type Result = Result<Article>;
+    type Result = Result<pb::Article>;
 
     fn handle(&mut self, msg: GetArticleDetail, _: &mut Context<Self>) -> Self::Result {
         if self
@@ -128,13 +129,22 @@ impl Handler<GetArticleDetail> for WsServer {
             .find(|(&session_id, _)| session_id == msg.session_id)
             .is_some()
         {
-            let (ref article, content) = self.repo.get_article_detail(&msg.article_id)?;
-            let mut res: Article = article.into();
+            let (article, content) = self.repo.get_article_detail(&msg.article_id)?;
+            let section = self.repo.find_section_by_id(&article.section_id)?;
+            let course = self.repo.find_course_by_id(&section.course_id)?;
+            let mut res: pb::Article = article.into();
             res.content = content.content;
-            let ref section = self.repo.find_section_by_id(&article.section_id)?;
             res.section = Some(section.into());
-            let ref course = self.repo.find_course_by_id(&section.course_id)?;
             res.course = Some(course.into());
+            if let Ok(info) = self.repo.find_user_study_info(&msg.user_id, "", &res.id) {
+                res.study_info = info.first().and_then(|info| {
+                    Some(pb::StudyInfo {
+                        percent: info.study_percent as u32,
+                        last_study_at: info.last_study_at,
+                    })
+                });
+            }
+
             Ok(res)
         } else {
             Err(anyhow::anyhow!("Invalid session id"))

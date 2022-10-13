@@ -1,9 +1,13 @@
+use std::future;
+
+use crate::models;
+
 use {
     crate::{errors, pb, repo::Repo, ws_server, ws_session},
     actix::Addr,
     actix_identity::Identity,
-    actix_protobuf::ProtoBufResponseBuilder as _,
-    actix_web::{dev::Payload, get, web, FromRequest, HttpRequest, HttpResponse},
+    actix_protobuf::{ProtoBuf, ProtoBufResponseBuilder as _},
+    actix_web::{dev::Payload, get, post, web, FromRequest, HttpRequest, HttpResponse},
     actix_web_actors::ws,
     log::*,
     ory_kratos_client::apis::{configuration::Configuration, v0alpha2_api::to_session},
@@ -19,19 +23,39 @@ use {
 async fn get_course_detail(
     repo: web::Data<Repo>,
     course_id: web::Path<String>,
+    loggedUser: LoggedUser,
 ) -> actix_web::Result<HttpResponse> {
     let repo = repo.into_inner();
-    // use web::block to offload blocking Diesel code without blocking server thread
-    let (ref course, ref sections, desc) =
-        web::block(move || repo.get_course_detail_by_course_id(course_id.as_str()))
-            .await?
-            .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    let (course, sections, desc) = repo
+        .get_course_detail_by_course_id(course_id.as_str())
+        .map_err(actix_web::error::ErrorInternalServerError)?;
 
     let mut c: pb::Course = course.into();
-    c.sections = sections.iter().map(|s| s.into()).collect();
+    c.sections = sections.into_iter().map(|s| s.into()).collect();
     if let Some(d) = desc {
         c.description = d;
     }
+
+    if !loggedUser.id.is_empty() {
+        let study_info = repo
+            .find_user_study_info(&loggedUser.id, course_id.as_str(), "")
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        c.sections.iter_mut().for_each(|s| {
+            s.articles.iter_mut().for_each(|a| {
+                a.study_info = study_info
+                    .iter()
+                    .find(|info| info.article_id == a.id)
+                    .and_then(|info| {
+                        Some(pb::StudyInfo {
+                            last_study_at: info.last_study_at,
+                            percent: info.study_percent as u32,
+                        })
+                    });
+            })
+        });
+    }
+
     // debug!("{:?}", query);
 
     HttpResponse::Ok().protobuf(c)
@@ -48,14 +72,16 @@ pub struct ListCourseQuery {
 async fn list_course(
     repo: web::Data<Repo>,
     query: web::Query<ListCourseQuery>,
+    user: LoggedUser,
 ) -> actix_web::Result<HttpResponse> {
     let repo = repo.into_inner();
     // use web::block to offload blocking Diesel code without blocking server thread
-    let ref courses = web::block(move || {
+    let courses = web::block(move || {
         repo.list_course(
             query.keyword.as_ref().unwrap_or(&String::new()),
             query.offset.unwrap_or(0),
             query.limit.unwrap_or(10),
+            user.id.as_str(),
         )
     })
     .await?
@@ -74,16 +100,16 @@ async fn get_article_comments(
 ) -> actix_web::Result<HttpResponse> {
     let repo = repo.into_inner();
     // use web::block to offload blocking Diesel code without blocking server thread
-    let ref comments = web::block(move || repo.find_comments_by_article_id(article_id.as_str()))
+    let comments = web::block(move || repo.find_comments_by_article_id(article_id.as_str()))
         .await?
         .map_err(actix_web::error::ErrorInternalServerError)?;
 
     HttpResponse::Ok().protobuf(pb::CommentList {
         comments: comments
-            .iter()
+            .into_iter()
             .map(|(replies, comment)| {
                 let mut pbc: pb::Comment = comment.into();
-                pbc.replies = replies.iter().map(|r| r.into()).collect();
+                pbc.replies = replies.into_iter().map(|r| r.into()).collect();
                 pbc
             })
             .collect::<Vec<_>>(),
@@ -150,8 +176,11 @@ impl FromRequest for LoggedUser {
                 }
             }
         }
-
-        ready(Err(errors::ServiceError::Unauthorized.into()))
+        ready(Ok(LoggedUser {
+            id: String::new(),
+            role: UserRole::Visitor,
+        }))
+        // ready(Err(errors::ServiceError::Unauthorized.into()))
     }
 }
 
@@ -208,6 +237,10 @@ pub async fn login(
 
 #[get("/me")]
 pub async fn get_me(logged_user: LoggedUser, id: Identity) -> actix_web::Result<HttpResponse> {
+    if logged_user.id.is_empty() {
+        return Ok(HttpResponse::Unauthorized().finish());
+    }
+
     id.remember(serde_json::to_string(&logged_user).unwrap());
     let u: pb::UserInfo = logged_user.into();
     HttpResponse::Ok().protobuf(u)
@@ -221,4 +254,39 @@ pub fn get_user_role(repo: &Repo, user_id: &str) -> UserRole {
         };
     }
     UserRole::Visitor
+}
+
+#[post("/study_info")]
+pub async fn save_study_info(
+    logged_user: LoggedUser,
+    repo: web::Data<Repo>,
+    req: ProtoBuf<pb::SaveStudyInfoRequest>,
+) -> actix_web::Result<HttpResponse> {
+    if logged_user.id.is_empty() {
+        return Ok(HttpResponse::Unauthorized().finish());
+    }
+
+    let info = models::UserStudyInfo {
+        id: 0,
+        user_id: logged_user.id,
+        article_id: req.article_id.to_owned(),
+        course_id: req.course_id.to_owned(),
+        last_study_at: chrono::Utc::now().naive_utc().timestamp().unsigned_abs(),
+        study_percent: req.percent as u16,
+    };
+    repo.save_study_info(&info);
+
+    Ok(HttpResponse::Ok().finish())
+}
+
+#[get("/test")]
+pub async fn test(
+    logged_user: LoggedUser,
+    repo: web::Data<Repo>,
+) -> actix_web::Result<HttpResponse> {
+    if let Err(e) = repo.test() {
+        println!("{:?}", e);
+    }
+
+    Ok(HttpResponse::Ok().finish())
 }

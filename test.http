@@ -1,10 +1,12 @@
-@host=http://127.0.0.1:8080
-@cookie=auth=IIVFSW+hiNl1QygzeU9zxhKcrmtQZcVT2AgrfIWXC7rJ76wn8bv399u/MSi0UEEP8c6q+g5OC0saJdwnBZLi47uUj3LE+iAEhZNmlXF6D0jMX6ExqpsrXQg8;
+@host=http://127.0.0.1:8081
+@cookie=bookauth=uo4Ka6jJb6qrWbhOO8Pa3Xzqvz81tUMH7oa5xMGp9ErBKjVBADpl5MedF6fl83yQqITIRWL0WqHn8prxtpa8xACUEhMmVOaIqbIJQLkBkl0Hla4pGue1EHM=
 ###
-GET {{host}}/course/G100013101?a=1&b=asd
+GET {{host}}/course/G100005701
+cookie: {{cookie}}
 
 ###
-GET {{host}}/courses?offset=1&keyword=java
+GET {{host}}/courses?offset=0&keyword=
+cookie: {{cookie}}
 ###
 GET {{host}}/login?return_to=/
 Cookie: ory_kratos_session=MTY2NTM5NTE4N3xTNmRXWGFJcF8wVmJObnp3YXl5UEY1cG13aktRcnQzdUZHZmNvSmJwUl9faUdBOUNwS1ptc3lyY1lsVkxfT29LZHVfRXRrVUNVVFlaaUlhWnpnR0JfSEMxQnVqTEVacjZtZU1iOVFBdTRXQ2tYVHBYeC13YU9nWW5BRm55NWVjOHVKWkFxZlkxQlE9PXwIjKssppgD77e4yYmMWX6x5qW95UKgEJqywFqcH4viqQ==
@@ -14,4 +16,5 @@ cookie: {{cookie}}
 ###
 GET {{host}}/article/L1029/comments
 ###
-GET http://127.0.0.1:5173
+GET http://127.0.0.1:8081/test
+cookie: {{cookie}}

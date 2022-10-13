@@ -5,6 +5,8 @@ use {
         mysql::MysqlConnection,
         prelude::*,
         r2d2::{self, ConnectionManager},
+        sql_query,
+        sql_types::{Integer, VarChar},
     },
     std::env,
 };
@@ -79,18 +81,52 @@ impl Repo {
         keyword: &str,
         offset: i64,
         limit: i64,
+        user_id: &str,
     ) -> Result<Vec<models::Course>> {
-        use crate::schema::course::dsl;
-
         let conn = &mut self.pool.get()?;
         // let a=dsl::course;
         // a.filter(predicate)
 
-        let res = dsl::course
-            .filter(dsl::title.like(format!("%{}%", keyword)))
-            .offset(offset)
-            .limit(limit)
-            .load::<models::Course>(conn)?;
+        // let res = dsl::course
+        //     .filter(dsl::title.like(format!("%{}%", keyword)))
+        //     .offset(offset)
+        //     .limit(limit)
+        //     .load::<models::Course>(conn)?;
+        let res = sql_query(
+            "
+SELECT
+    course.*
+FROM
+    course
+    LEFT JOIN (
+        SELECT
+            course_id,
+            MAX(last_study_at) AS last_study_at
+        FROM
+            user_study_info
+        WHERE
+            user_id = ?
+        GROUP BY
+            course_id
+        ORDER BY
+            2 DESC
+    ) AS t ON course.id = t.course_id
+WHERE
+    title LIKE ?
+ORDER BY
+    t.last_study_at DESC,
+    id
+LIMIT
+    ?
+OFFSET
+    ?;
+            ",
+        )
+        .bind::<VarChar, _>(user_id)
+        .bind::<VarChar, _>(format!("%{}%", keyword))
+        .bind::<Integer, _>(limit as i32)
+        .bind::<Integer, _>(offset as i32)
+        .get_results(conn)?;
 
         Ok(res)
     }
@@ -146,5 +182,64 @@ impl Repo {
             .first::<models::UserRole>(conn)
             .optional()?;
         Ok(one_role)
+    }
+
+    pub fn save_study_info(&self, new_study_info: &models::UserStudyInfo) -> Result<()> {
+        use crate::schema::user_study_info;
+
+        let conn = &mut self.pool.get()?;
+
+        diesel::replace_into(user_study_info::table)
+            .values(new_study_info)
+            .execute(conn)?;
+
+        Ok(())
+    }
+
+    pub fn test(&self) -> Result<()> {
+        use crate::schema::user_study_info::{self, dsl};
+
+        let conn = &mut self.pool.get()?;
+
+        let mut sql = user_study_info::table
+            .filter(dsl::user_id.eq("0698edd5-1ea8-4493-9092-003c4230516a"))
+            .into_boxed();
+
+        let article_id = "G183";
+        let course_id = "G100002201";
+
+        if !article_id.is_empty() {
+            sql = sql.filter(dsl::article_id.eq(article_id));
+        } else {
+            sql = sql.filter(dsl::course_id.eq(course_id));
+        }
+        let res = sql.load::<models::UserStudyInfo>(conn)?;
+        println!("{:?}", res);
+
+        Ok(())
+    }
+
+    pub fn find_user_study_info(
+        &self,
+        user_id: &str,
+        course_id: &str,
+        article_id: &str,
+    ) -> Result<Vec<models::UserStudyInfo>> {
+        use crate::schema::user_study_info::{self, dsl};
+
+        let conn = &mut self.pool.get()?;
+
+        let mut sql = user_study_info::table
+            .filter(dsl::user_id.eq(user_id))
+            .into_boxed();
+
+        if !article_id.is_empty() {
+            sql = sql.filter(dsl::article_id.eq(article_id));
+        } else {
+            sql = sql.filter(dsl::course_id.eq(course_id));
+        }
+        let res = sql.load::<models::UserStudyInfo>(conn)?;
+
+        Ok(res)
     }
 }

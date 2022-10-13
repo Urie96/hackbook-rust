@@ -15,6 +15,13 @@ message Course {
   string title = 10;
   repeated Section sections = 11;
   string description = 12;
+
+  StudyInfo studyInfo = 13;
+}
+
+message StudyInfo {
+  uint32 percent = 1;
+  uint64 lastStudyAt = 2;
 }
 
 message CourseList {
@@ -39,6 +46,8 @@ message Article {
   string content = 5;
   Course course = 6;
   Section section = 7;
+
+  StudyInfo studyInfo = 8;
 }
 
 message ArticleList {
@@ -53,7 +62,7 @@ message Comment {
 }
 
 message CommentList {
-  repeated Comment comments = 4;
+  repeated Comment comments = 1;
 }
 
 message UserInfo {
@@ -64,4 +73,20 @@ message UserInfo {
 enum UserRole {
     Visitor = 0;
     Reader = 1;
+}
+
+message SaveStudyInfoRequest {
+  string articleId = 1;
+  string courseId = 2;
+  uint32 percent = 3;
+}
+
+message ArticleStudyInfo {
+  string articleId = 1;
+  uint32 percent = 2;
+  uint64 last_study_at = 3;
+}
+
+message GetArticleStudyInfoResponse {
+  repeated ArticleStudyInfo articleStudyInfos = 1;
 }

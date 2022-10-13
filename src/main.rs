@@ -48,7 +48,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .wrap(IdentityService::new(
                 CookieIdentityPolicy::new("1996".repeat(8).as_bytes())
-                    .name("auth")
+                    .name("bookauth")
                     .path("/")
                     .domain(domain.as_str())
                     .max_age(Duration::days(7))
@@ -60,6 +60,8 @@ async fn main() -> std::io::Result<()> {
             .service(handlers::ws_start)
             .service(handlers::login)
             .service(handlers::get_me)
+            .service(handlers::save_study_info)
+            .service(handlers::test)
     })
     .bind((host, port))?
     .run()

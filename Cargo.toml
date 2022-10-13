@@ -26,6 +26,7 @@ anyhow = "1.0"
 chrono = "0.4.22"
 diesel = {version = "2.0.0", features = ["mysql", "r2d2"]}
 dotenvy = "0.15"
+futures-util = "0.3.24"
 ory-kratos-client = "0.10.1"
 prost = "0.11"
 prost-build = "0.11"
