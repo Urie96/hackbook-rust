@@ -1,3 +1,4 @@
 /target
 .env
 deployment.yml
+libmysqlclient.so.21

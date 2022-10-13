@@ -1,1 +1,3 @@
-target
+target/release/build
+target/release/deps
+target/release/.fingerprint
