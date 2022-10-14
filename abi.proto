@@ -20,12 +20,13 @@ message Course {
 }
 
 message StudyInfo {
-  uint32 percent = 1;
+  float percent = 1;
   uint64 lastStudyAt = 2;
 }
 
-message CourseList {
+message ListCourseResponse {
   repeated Course courses = 1;
+  bool more = 2;
 }
 
 message Section {
@@ -78,15 +79,5 @@ enum UserRole {
 message SaveStudyInfoRequest {
   string articleId = 1;
   string courseId = 2;
-  uint32 percent = 3;
-}
-
-message ArticleStudyInfo {
-  string articleId = 1;
-  uint32 percent = 2;
-  uint64 last_study_at = 3;
-}
-
-message GetArticleStudyInfoResponse {
-  repeated ArticleStudyInfo articleStudyInfos = 1;
+  float percent = 3;
 }

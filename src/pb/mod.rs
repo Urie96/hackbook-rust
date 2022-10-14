@@ -23,14 +23,6 @@ impl From<models::Course> for Course {
     }
 }
 
-impl From<Vec<models::Course>> for CourseList {
-    fn from(courses: Vec<models::Course>) -> Self {
-        CourseList {
-            courses: courses.into_iter().map(|c| c.into()).collect(),
-        }
-    }
-}
-
 impl From<(models::Section, Vec<models::Article>)> for Section {
     fn from((section, articles): (models::Section, Vec<models::Article>)) -> Self {
         Section {

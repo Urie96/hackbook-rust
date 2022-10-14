@@ -1,9 +1,5 @@
-use std::future;
-
-use crate::models;
-
 use {
-    crate::{errors, pb, repo::Repo, ws_server, ws_session},
+    crate::{models, pb, repo::Repo, ws_server, ws_session},
     actix::Addr,
     actix_identity::Identity,
     actix_protobuf::{ProtoBuf, ProtoBufResponseBuilder as _},
@@ -23,7 +19,7 @@ use {
 async fn get_course_detail(
     repo: web::Data<Repo>,
     course_id: web::Path<String>,
-    loggedUser: LoggedUser,
+    logged_user: LoggedUser,
 ) -> actix_web::Result<HttpResponse> {
     let repo = repo.into_inner();
 
@@ -37,9 +33,9 @@ async fn get_course_detail(
         c.description = d;
     }
 
-    if !loggedUser.id.is_empty() {
+    if !logged_user.id.is_empty() {
         let study_info = repo
-            .find_user_study_info(&loggedUser.id, course_id.as_str(), "")
+            .find_user_study_info(&logged_user.id, course_id.as_str(), "")
             .map_err(actix_web::error::ErrorInternalServerError)?;
         c.sections.iter_mut().for_each(|s| {
             s.articles.iter_mut().for_each(|a| {
@@ -49,7 +45,7 @@ async fn get_course_detail(
                     .and_then(|info| {
                         Some(pb::StudyInfo {
                             last_study_at: info.last_study_at,
-                            percent: info.study_percent as u32,
+                            percent: info.study_percent,
                         })
                     });
             })
@@ -76,7 +72,7 @@ async fn list_course(
 ) -> actix_web::Result<HttpResponse> {
     let repo = repo.into_inner();
     // use web::block to offload blocking Diesel code without blocking server thread
-    let courses = web::block(move || {
+    let (courses, has_more) = web::block(move || {
         repo.list_course(
             query.keyword.as_ref().unwrap_or(&String::new()),
             query.offset.unwrap_or(0),
@@ -87,8 +83,10 @@ async fn list_course(
     .await?
     .map_err(actix_web::error::ErrorInternalServerError)?;
 
-    let c: pb::CourseList = courses.into();
-    // debug!("{:?}", query);
+    let c = pb::ListCourseResponse {
+        courses: courses.into_iter().map(|c| c.into()).collect(),
+        more: has_more,
+    };
 
     HttpResponse::Ok().protobuf(c)
 }
@@ -272,16 +270,17 @@ pub async fn save_study_info(
         article_id: req.article_id.to_owned(),
         course_id: req.course_id.to_owned(),
         last_study_at: chrono::Utc::now().naive_utc().timestamp().unsigned_abs(),
-        study_percent: req.percent as u16,
+        study_percent: req.percent,
     };
-    repo.save_study_info(&info);
+    repo.save_study_info(&info)
+        .map_err(actix_web::error::ErrorInternalServerError)?;
 
     Ok(HttpResponse::Ok().finish())
 }
 
 #[get("/test")]
 pub async fn test(
-    logged_user: LoggedUser,
+    _logged_user: LoggedUser,
     repo: web::Data<Repo>,
 ) -> actix_web::Result<HttpResponse> {
     if let Err(e) = repo.test() {

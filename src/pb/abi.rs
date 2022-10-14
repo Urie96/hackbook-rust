@@ -29,15 +29,17 @@ pub struct Course {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StudyInfo {
-    #[prost(uint32, tag="1")]
-    pub percent: u32,
+    #[prost(float, tag="1")]
+    pub percent: f32,
     #[prost(uint64, tag="2")]
     pub last_study_at: u64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct CourseList {
+pub struct ListCourseResponse {
     #[prost(message, repeated, tag="1")]
     pub courses: ::prost::alloc::vec::Vec<Course>,
+    #[prost(bool, tag="2")]
+    pub more: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Section {
@@ -106,22 +108,8 @@ pub struct SaveStudyInfoRequest {
     pub article_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
     pub course_id: ::prost::alloc::string::String,
-    #[prost(uint32, tag="3")]
-    pub percent: u32,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ArticleStudyInfo {
-    #[prost(string, tag="1")]
-    pub article_id: ::prost::alloc::string::String,
-    #[prost(uint32, tag="2")]
-    pub percent: u32,
-    #[prost(uint64, tag="3")]
-    pub last_study_at: u64,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetArticleStudyInfoResponse {
-    #[prost(message, repeated, tag="1")]
-    pub article_study_infos: ::prost::alloc::vec::Vec<ArticleStudyInfo>,
+    #[prost(float, tag="3")]
+    pub percent: f32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

@@ -74,7 +74,7 @@ diesel::table! {
         course_id -> Varchar,
         article_id -> Varchar,
         last_study_at -> Unsigned<Bigint>,
-        study_percent -> Unsigned<Smallint>,
+        study_percent -> Float,
         user_id -> Varchar,
     }
 }

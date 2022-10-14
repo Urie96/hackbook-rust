@@ -82,7 +82,7 @@ impl Repo {
         offset: i64,
         limit: i64,
         user_id: &str,
-    ) -> Result<Vec<models::Course>> {
+    ) -> Result<(Vec<models::Course>, bool)> {
         let conn = &mut self.pool.get()?;
         // let a=dsl::course;
         // a.filter(predicate)
@@ -92,7 +92,7 @@ impl Repo {
         //     .offset(offset)
         //     .limit(limit)
         //     .load::<models::Course>(conn)?;
-        let res = sql_query(
+        let mut res = sql_query(
             "
 SELECT
     course.*
@@ -124,11 +124,16 @@ OFFSET
         )
         .bind::<VarChar, _>(user_id)
         .bind::<VarChar, _>(format!("%{}%", keyword))
-        .bind::<Integer, _>(limit as i32)
+        .bind::<Integer, _>((limit + 1) as i32)
         .bind::<Integer, _>(offset as i32)
         .get_results(conn)?;
 
-        Ok(res)
+        if res.len() > limit as usize {
+            res.pop();
+            return Ok((res, true));
+        }
+
+        Ok((res, false))
     }
 
     pub fn get_article_detail(

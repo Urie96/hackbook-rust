@@ -139,7 +139,7 @@ impl Handler<GetArticleDetail> for WsServer {
             if let Ok(info) = self.repo.find_user_study_info(&msg.user_id, "", &res.id) {
                 res.study_info = info.first().and_then(|info| {
                     Some(pb::StudyInfo {
-                        percent: info.study_percent as u32,
+                        percent: info.study_percent,
                         last_study_at: info.last_study_at,
                     })
                 });

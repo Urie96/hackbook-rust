@@ -98,6 +98,6 @@ pub struct UserStudyInfo {
     pub course_id: String,
     pub article_id: String,
     pub last_study_at: u64,
-    pub study_percent: u16,
+    pub study_percent: f32,
     pub user_id: String,
 }
