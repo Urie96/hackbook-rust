@@ -1,4 +1,7 @@
-.PHONY: image setup migration pb
+.PHONY: run image setup migration pb
+
+run:
+	cargo run --bin hackbook-server
 
 setup:
 	diesel setup

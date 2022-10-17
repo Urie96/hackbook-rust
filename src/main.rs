@@ -12,7 +12,6 @@ use {
     time::Duration,
 };
 
-mod errors;
 mod handlers;
 mod models;
 mod pb;
@@ -61,6 +60,7 @@ async fn main() -> std::io::Result<()> {
             .service(handlers::login)
             .service(handlers::get_me)
             .service(handlers::save_study_info)
+            .service(handlers::get_connect_seconds)
             .service(handlers::test)
     })
     .bind((host, port))?

@@ -1,9 +1,12 @@
 use {
     crate::schema::{
         article, article_comment, article_content, course, course_description, section, user_role,
-        user_study_info,
+        user_study_info, ws_connect_info,
     },
-    diesel::prelude::{Associations, Identifiable, Insertable, Queryable, QueryableByName},
+    diesel::{
+        prelude::{Associations, Identifiable, Insertable, Queryable, QueryableByName},
+        sql_types::{BigInt, Unsigned},
+    },
 };
 
 #[derive(Identifiable, Debug, Queryable, Associations)]
@@ -100,4 +103,19 @@ pub struct UserStudyInfo {
     pub last_study_at: u64,
     pub study_percent: f32,
     pub user_id: String,
+}
+
+#[derive(Identifiable, Debug, Queryable, Insertable)]
+#[diesel(table_name = ws_connect_info)]
+pub struct WsConnectInfo {
+    pub id: i32,
+    pub user_id: String,
+    pub start_at: u64,
+    pub end_at: u64,
+}
+
+#[derive(QueryableByName)]
+pub struct ConnectionSecs {
+    #[diesel(sql_type = Unsigned<BigInt>)]
+    pub secs: u64,
 }

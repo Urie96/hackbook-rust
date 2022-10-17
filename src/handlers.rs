@@ -129,6 +129,7 @@ async fn ws_start(
                 hb: Instant::now(),
                 addr: srv.get_ref().clone(),
                 user_id: logged_user.id,
+                start_at: chrono::Utc::now(),
             },
             &req,
             stream,
@@ -234,24 +235,32 @@ pub async fn login(
 }
 
 #[get("/me")]
-pub async fn get_me(logged_user: LoggedUser, id: Identity) -> actix_web::Result<HttpResponse> {
+pub async fn get_me(
+    mut logged_user: LoggedUser,
+    id: Identity,
+    repo: web::Data<Repo>,
+) -> actix_web::Result<HttpResponse> {
     if logged_user.id.is_empty() {
         return Ok(HttpResponse::Unauthorized().finish());
     }
 
+    logged_user.role = get_user_role(&repo, logged_user.id.as_str());
     id.remember(serde_json::to_string(&logged_user).unwrap());
     let u: pb::UserInfo = logged_user.into();
     HttpResponse::Ok().protobuf(u)
 }
 
 pub fn get_user_role(repo: &Repo, user_id: &str) -> UserRole {
-    if let Ok(Some(user_role)) = repo.find_user_role(user_id) {
-        return match user_role.role {
+    match repo.find_user_role(user_id) {
+        Ok(user_role) => match user_role.role {
             1 => UserRole::Reader,
             _ => UserRole::Visitor,
-        };
+        },
+        Err(e) => {
+            error!("get_user_role, {:?}", e);
+            UserRole::Visitor
+        }
     }
-    UserRole::Visitor
 }
 
 #[post("/study_info")]
@@ -269,13 +278,40 @@ pub async fn save_study_info(
         user_id: logged_user.id,
         article_id: req.article_id.to_owned(),
         course_id: req.course_id.to_owned(),
-        last_study_at: chrono::Utc::now().naive_utc().timestamp().unsigned_abs(),
+        last_study_at: chrono::Utc::now().timestamp().unsigned_abs(),
         study_percent: req.percent,
     };
     repo.save_study_info(&info)
         .map_err(actix_web::error::ErrorInternalServerError)?;
 
     Ok(HttpResponse::Ok().finish())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetConnectSecQuery {
+    start_at_lt: u64,
+    start_at_gt: u64,
+}
+
+#[get("/connect_seconds")]
+pub async fn get_connect_seconds(
+    logged_user: LoggedUser,
+    repo: web::Data<Repo>,
+    query: web::Query<GetConnectSecQuery>,
+) -> actix_web::Result<HttpResponse> {
+    if logged_user.id.is_empty() {
+        return Ok(HttpResponse::Unauthorized().finish());
+    }
+
+    let secs = repo
+        .get_connect_seconds(
+            logged_user.id.as_str(),
+            query.start_at_gt,
+            query.start_at_lt,
+        )
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    Ok(HttpResponse::Ok().json(secs))
 }
 
 #[get("/test")]

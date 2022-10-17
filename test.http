@@ -1,5 +1,5 @@
 @host=http://127.0.0.1:8081
-@cookie=bookauth=uo4Ka6jJb6qrWbhOO8Pa3Xzqvz81tUMH7oa5xMGp9ErBKjVBADpl5MedF6fl83yQqITIRWL0WqHn8prxtpa8xACUEhMmVOaIqbIJQLkBkl0Hla4pGue1EHM=
+@cookie=csrf_token_aed7b638053b54b8ec7a75d05d8cf582f029f923993466bf46f8f1ca9da5d692=DX4F0TaJTFywJ7voHrWFcgiIiPGotZoi/fj5FgSs6BU=; bookauth=COOM3KdecT/6+yXmoO1y1GXTcrXOoWXcclZioRpWvhH278EmtSlRSlDW16z4+J9JL6Rwc9X0mqX1g4jHrlva1zSh3ET6Oft1NakuZC/HYYdOSgPTviNT+/Nk
 ###
 GET {{host}}/course/G100005701
 cookie: {{cookie}}
@@ -17,4 +17,7 @@ cookie: {{cookie}}
 GET {{host}}/article/L1029/comments
 ###
 GET http://127.0.0.1:8081/test
+cookie: {{cookie}}
+###
+GET http://127.0.0.1:8081/connect_seconds?start_at_gt=1665995452&start_at_lt=999999999999
 cookie: {{cookie}}

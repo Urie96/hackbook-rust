@@ -79,6 +79,15 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    ws_connect_info (id) {
+        id -> Integer,
+        user_id -> Varchar,
+        start_at -> Unsigned<Bigint>,
+        end_at -> Unsigned<Bigint>,
+    }
+}
+
 diesel::joinable!(article -> section (sectionId));
 diesel::joinable!(article_comment -> article (articleId));
 diesel::joinable!(article_content -> article (articleId));
@@ -96,4 +105,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     section,
     user_role,
     user_study_info,
+    ws_connect_info,
 );

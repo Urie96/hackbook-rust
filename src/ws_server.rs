@@ -1,5 +1,5 @@
 use {
-    crate::{pb, repo::Repo},
+    crate::{models, pb, repo::Repo},
     actix::prelude::*,
     actix_web_actors::ws::CloseReason,
     anyhow::Result,
@@ -28,6 +28,7 @@ pub struct Connect {
 #[rtype(result = "()")]
 pub struct Disconnect {
     pub id: usize,
+    pub start_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Session is disconnected
@@ -111,9 +112,16 @@ impl Handler<Disconnect> for WsServer {
         println!("{:?} disconnected", msg.id);
 
         // remove address
-        if self.sessions.remove(&msg.id).is_some() {
+        if let Some(session) = self.sessions.remove(&msg.id) {
             println!("Removed session");
             println!("login count: {}", self.sessions.len());
+
+            self.repo.save_connect_info(&models::WsConnectInfo {
+                id: 0,
+                user_id: session.user_id,
+                start_at: msg.start_at.timestamp() as u64,
+                end_at: chrono::Utc::now().timestamp() as u64,
+            });
         }
     }
 }

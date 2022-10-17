@@ -1,3 +1,5 @@
+use diesel::sql_types::BigInt;
+
 use {
     crate::models,
     anyhow::Result,
@@ -6,23 +8,26 @@ use {
         prelude::*,
         r2d2::{self, ConnectionManager},
         sql_query,
-        sql_types::{Integer, VarChar},
+        sql_types::{Integer, Unsigned, VarChar},
     },
     std::env,
 };
 
+type DbConnection = diesel_logger::LoggingConnection<MysqlConnection>;
+
 #[derive(Clone)]
 pub struct Repo {
-    pool: r2d2::Pool<ConnectionManager<MysqlConnection>>,
+    pool: r2d2::Pool<ConnectionManager<DbConnection>>,
 }
 
 impl Repo {
     pub fn new() -> Self {
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-        let manager = ConnectionManager::<MysqlConnection>::new(database_url);
+        let manager = ConnectionManager::<DbConnection>::new(database_url);
         let pool = r2d2::Pool::builder()
             .build(manager)
             .expect("Failed to create pool.");
+        // diesel_logger::LoggingConnection::new(manager);
         Repo { pool }
     }
 
@@ -174,18 +179,17 @@ OFFSET
         Ok(data)
     }
 
-    pub fn find_user_role(&self, user_id: &str) -> Result<Option<models::UserRole>> {
+    pub fn find_user_role(&self, user_id: &str) -> Result<models::UserRole> {
         use crate::schema::user_role::dsl;
 
         let conn = &mut self.pool.get()?;
 
-        let now = chrono::Utc::now().naive_utc().timestamp().unsigned_abs();
+        let now = chrono::Utc::now().timestamp().unsigned_abs();
 
         let one_role = dsl::user_role
             .filter(dsl::user_id.eq(user_id))
             .filter(dsl::valid_before.gt(now))
-            .first::<models::UserRole>(conn)
-            .optional()?;
+            .first::<models::UserRole>(conn)?;
         Ok(one_role)
     }
 
@@ -246,5 +250,50 @@ OFFSET
         let res = sql.load::<models::UserStudyInfo>(conn)?;
 
         Ok(res)
+    }
+
+    pub fn save_connect_info(&self, new_connect_info: &models::WsConnectInfo) -> Result<()> {
+        use crate::schema::ws_connect_info;
+
+        let conn = &mut self.pool.get()?;
+
+        diesel::insert_into(ws_connect_info::table)
+            .values(new_connect_info)
+            .execute(conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_connect_seconds(
+        &self,
+        user_id: &str,
+        start_at_gt: u64,
+        start_at_lt: u64,
+    ) -> Result<u64> {
+        let conn = &mut self.pool.get()?;
+
+        let res = sql_query(
+            "
+SELECT
+    IFNULL(SUM(s), 0) AS secs
+FROM
+    (
+        SELECT
+            end_at - start_at AS s
+        FROM
+            ws_connect_info
+        WHERE
+            user_id = ?
+            AND start_at BETWEEN ?
+            AND ?
+    ) t;
+            ",
+        )
+        .bind::<VarChar, _>(user_id)
+        .bind::<Unsigned<BigInt>, _>(start_at_gt)
+        .bind::<Unsigned<BigInt>, _>(start_at_lt)
+        .get_result::<models::ConnectionSecs>(conn)?;
+
+        Ok(res.secs)
     }
 }

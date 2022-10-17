@@ -25,6 +25,8 @@ pub struct WsSession {
     pub addr: Addr<ws_server::WsServer>,
 
     pub user_id: String,
+
+    pub start_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl WsSession {
@@ -39,7 +41,10 @@ impl WsSession {
                 println!("Websocket Client heartbeat failed, disconnecting!");
 
                 // notify chat server
-                act.addr.do_send(ws_server::Disconnect { id: act.id });
+                act.addr.do_send(ws_server::Disconnect {
+                    id: act.id,
+                    start_at: act.start_at,
+                });
 
                 // stop actor
                 ctx.stop();
@@ -88,7 +93,10 @@ impl Actor for WsSession {
 
     fn stopping(&mut self, _: &mut Self::Context) -> Running {
         // notify chat server
-        self.addr.do_send(ws_server::Disconnect { id: self.id });
+        self.addr.do_send(ws_server::Disconnect {
+            id: self.id,
+            start_at: self.start_at,
+        });
         Running::Stop
     }
 }
