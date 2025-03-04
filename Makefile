@@ -12,7 +12,11 @@ setup:
 pb:
 	cargo run --bin proto
 
-image:
-	cargo build --release
+build:
+	# rustup target add x86_64-unknown-linux-musl
+	cargo build --release --target=x86_64-unknown-linux-musl
+	# cargo build --release
+
+image: build
 	docker build -t hub.lubui.com/hackbook-rust .
 	docker push hub.lubui.com/hackbook-rust

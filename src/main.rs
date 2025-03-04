@@ -49,7 +49,7 @@ async fn main() -> std::io::Result<()> {
                 CookieIdentityPolicy::new("1996".repeat(8).as_bytes())
                     .name("bookauth")
                     .path("/")
-                    .domain(domain.as_str())
+                    // .domain(domain.as_str())
                     .max_age(Duration::days(7))
                     .secure(false), // this can only be true if you have https
             ))

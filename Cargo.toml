@@ -1,32 +1,32 @@
 [package]
 edition = "2021"
-name = "hackbook-server"
+name    = "hackbook-server"
 version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-actix = "0.13"
-actix-identity = "0.4"
-actix-protobuf = "0.9"
-actix-web = "4"
+actix            = "0.13"
+actix-identity   = "0.4"
+actix-protobuf   = "0.9"
+actix-web        = "4"
 actix-web-actors = "4.1"
 
 env_logger = "0.9"
-log = "0.4"
-rand = "0.8"
-serde = {version = "1", features = ["derive"]}
+log        = "0.4"
+rand       = "0.8"
+serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 anyhow = "1.0"
 chrono = "0.4.22"
-diesel = {version = "2.0.0", features = ["mysql", "r2d2"]}
-diesel_logger = "0.2.0"
+diesel = { version = "2.2.2", features = ["mysql", "r2d2"] }
+# diesel_logger = "0.2.0"
 dotenvy = "0.15"
-ory-kratos-client = "0.10.1"
-prost = "0.11"
+# ory-kratos-client = "0.10.1"
+prost       = "0.11"
 prost-build = "0.11"
-reqwest = {version = "0.11", features = ["blocking", "json"]}
+# reqwest = {version = "0.11", features = ["blocking", "json"]}
 time = "0.3"
 
 [build-dependencies]

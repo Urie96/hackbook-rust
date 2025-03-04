@@ -1,5 +1,3 @@
-use diesel::sql_types::BigInt;
-
 use {
     crate::models,
     anyhow::Result,
@@ -8,22 +6,20 @@ use {
         prelude::*,
         r2d2::{self, ConnectionManager},
         sql_query,
-        sql_types::{Integer, Unsigned, VarChar},
+        sql_types::{BigInt, Integer, Unsigned, VarChar},
     },
     std::env,
 };
 
-type DbConnection = diesel_logger::LoggingConnection<MysqlConnection>;
-
 #[derive(Clone)]
 pub struct Repo {
-    pool: r2d2::Pool<ConnectionManager<DbConnection>>,
+    pool: r2d2::Pool<ConnectionManager<MysqlConnection>>,
 }
 
 impl Repo {
     pub fn new() -> Self {
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-        let manager = ConnectionManager::<DbConnection>::new(database_url);
+        let manager = ConnectionManager::<MysqlConnection>::new(database_url);
         let pool = r2d2::Pool::builder()
             .build(manager)
             .expect("Failed to create pool.");

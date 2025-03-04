@@ -6,10 +6,10 @@ use {
     actix_web::{dev::Payload, get, post, web, FromRequest, HttpRequest, HttpResponse},
     actix_web_actors::ws,
     log::*,
-    ory_kratos_client::apis::{configuration::Configuration, v0alpha2_api::to_session},
+    // ory_kratos_client::apis::{configuration::Configuration, v0alpha2_api::to_session},
     serde::{Deserialize, Serialize},
     std::{
-        env,
+        // env,
         future::{ready, Ready},
         time::Instant,
     },
@@ -190,7 +190,7 @@ pub struct LoginQuery {
 
 #[get("/login")]
 pub async fn login(
-    req: HttpRequest,
+    // req: HttpRequest,
     id: Identity,
     repo: web::Data<Repo>,
     query: web::Query<LoginQuery>,
@@ -198,40 +198,51 @@ pub async fn login(
     let success = HttpResponse::TemporaryRedirect()
         .insert_header(("location", query.return_to.as_str()))
         .finish();
-    let failure = HttpResponse::TemporaryRedirect()
-        .insert_header((
-            "location",
-            format!(
-                "{}/self-service/login/browser?aal=&refresh=&return_to={}",
-                env::var("SSO").unwrap_or("https://sso.lubui.com".to_string()),
-                query.return_to
-            ),
-        ))
-        .finish();
+    let uid = String::from("0698edd5-1ea8-4493-9092-003c4230516a");
+    let user = LoggedUser {
+        role: get_user_role(repo.as_ref(), uid.as_ref()),
+        id: uid,
+    };
+    id.remember(serde_json::to_string(&user).unwrap());
+    Ok(success)
 
-    let mut config = Configuration::new();
-    config.base_path = "https://sso.lubui.com".to_owned();
-    match to_session(
-        &config,
-        None,
-        req.headers().get("cookie").map(|a| a.to_str().unwrap()),
-    )
-    .await
-    {
-        Ok(session) => {
-            let user_id = session.identity.id;
-            let user = LoggedUser {
-                id: user_id.to_owned(),
-                role: get_user_role(repo.as_ref(), user_id.as_ref()),
-            };
-            id.remember(serde_json::to_string(&user).unwrap());
-            Ok(success)
-        }
-        Err(e) => {
-            error!("11, {:?}", e);
-            Ok(failure)
-        }
-    }
+    // let success = HttpResponse::TemporaryRedirect()
+    //     .insert_header(("location", query.return_to.as_str()))
+    //     .finish();
+    // let failure = HttpResponse::TemporaryRedirect()
+    //     .insert_header((
+    //         "location",
+    //         format!(
+    //             "{}/self-service/login/browser?aal=&refresh=&return_to={}",
+    //             env::var("SSO").unwrap_or("https://sso.lubui.com".to_string()),
+    //             query.return_to
+    //         ),
+    //     ))
+    //     .finish();
+    //
+    // let mut config = Configuration::new();
+    // config.base_path = "https://sso.lubui.com".to_owned();
+    // match to_session(
+    //     &config,
+    //     None,
+    //     req.headers().get("cookie").map(|a| a.to_str().unwrap()),
+    // )
+    // .await
+    // {
+    //     Ok(session) => {
+    //         let user_id = session.identity.id;
+    //         let user = LoggedUser {
+    //             id: user_id.to_owned(),
+    //             role: get_user_role(repo.as_ref(), user_id.as_ref()),
+    //         };
+    //         id.remember(serde_json::to_string(&user).unwrap());
+    //         Ok(success)
+    //     }
+    //     Err(e) => {
+    //         error!("11, {:?}", e);
+    //         Ok(failure)
+    //     }
+    // }
 }
 
 #[get("/me")]

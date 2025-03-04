@@ -1,0 +1,12 @@
+services:
+  hackbook-rust:
+    container_name: hackbook-rust
+    build: .
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: Asia/Shanghai
+      DATABASE_URL:
+      PORT: 8095
+    network_mode: host
+    restart: unless-stopped
