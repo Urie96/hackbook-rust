@@ -2,3 +2,4 @@
 .env
 deployment.yml
 libmysqlclient.so.21
+*.db

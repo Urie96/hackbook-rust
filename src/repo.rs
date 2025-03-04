@@ -2,65 +2,56 @@ use {
     crate::models,
     anyhow::Result,
     diesel::{
-        mysql::MysqlConnection,
         prelude::*,
-        r2d2::{self, ConnectionManager},
         sql_query,
-        sql_types::{BigInt, Integer, Unsigned, VarChar},
+        sql_types::{BigInt, Integer, VarChar},
+        SqliteConnection,
     },
-    std::env,
+    std::{env, sync::Arc},
 };
 
-#[derive(Clone)]
 pub struct Repo {
-    pool: r2d2::Pool<ConnectionManager<MysqlConnection>>,
+    conn: SqliteConnection,
 }
 
 impl Repo {
     pub fn new() -> Self {
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-        let manager = ConnectionManager::<MysqlConnection>::new(database_url);
-        let pool = r2d2::Pool::builder()
-            .build(manager)
-            .expect("Failed to create pool.");
-        // diesel_logger::LoggingConnection::new(manager);
-        Repo { pool }
+        let conn = SqliteConnection::establish(&database_url)
+            .unwrap_or_else(|_| panic!("Error connecting to {}", database_url));
+
+        Repo { conn }
     }
 
-    pub fn find_section_by_id(&self, id: &str) -> Result<models::Section> {
+    pub fn find_section_by_id(&mut self, id: &str) -> Result<models::Section> {
         use crate::schema::section::dsl;
-
-        let conn = &mut self.pool.get()?;
 
         Ok(dsl::section
             .filter(dsl::id.eq(id))
-            .first::<models::Section>(conn)?)
+            .first::<models::Section>(&mut self.conn)?)
     }
 
-    pub fn find_course_by_id(&self, id: &str) -> Result<models::Course> {
+    pub fn find_course_by_id(&mut self, id: &str) -> Result<models::Course> {
         use crate::schema::course::dsl;
-
-        let conn = &mut self.pool.get()?;
 
         Ok(dsl::course
             .filter(dsl::id.eq(id))
-            .first::<models::Course>(conn)?)
+            .first::<models::Course>(&mut self.conn)?)
     }
 
     pub fn get_course_detail_by_course_id(
-        &self,
+        &mut self,
         course_id: &str,
     ) -> Result<(
         models::Course,
         Vec<(models::Section, Vec<models::Article>)>,
         Option<String>,
     )> {
-        let conn = &mut self.pool.get()?;
         use crate::schema::course;
 
         let one_course = course::dsl::course
             .filter(course::dsl::id.eq(course_id))
-            .first::<models::Course>(conn)?;
+            .first::<models::Course>(&mut self.conn)?;
 
         let sections = models::Section::belonging_to(&one_course).load::<models::Section>(conn)?;
 
@@ -84,7 +75,6 @@ impl Repo {
         limit: i64,
         user_id: &str,
     ) -> Result<(Vec<models::Course>, bool)> {
-        let conn = &mut self.pool.get()?;
         // let a=dsl::course;
         // a.filter(predicate)
 
@@ -127,7 +117,7 @@ OFFSET
         .bind::<VarChar, _>(format!("%{}%", keyword))
         .bind::<Integer, _>((limit + 1) as i32)
         .bind::<Integer, _>(offset as i32)
-        .get_results(conn)?;
+        .get_results(&mut self.conn)?;
 
         if res.len() > limit as usize {
             res.pop();

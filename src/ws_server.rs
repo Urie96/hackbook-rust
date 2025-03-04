@@ -49,15 +49,15 @@ struct SessionInfo {
 pub struct WsServer {
     sessions: HashMap<usize, SessionInfo>,
     rng: ThreadRng,
-    repo: Arc<Repo>,
+    repo: Repo,
 }
 
 impl WsServer {
-    pub fn new(repo: Arc<Repo>) -> WsServer {
+    pub fn new(repo: Repo) -> WsServer {
         WsServer {
             sessions: HashMap::new(),
             rng: rand::thread_rng(),
-            repo: repo,
+            repo,
         }
     }
 }
