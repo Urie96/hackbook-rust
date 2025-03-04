@@ -68,7 +68,8 @@
               cargo-edit
               cargo-watch
               rust-analyzer
-              libmysqlclient
+              diesel-cli
+              sqlite
             ];
 
             env = {

@@ -2,107 +2,114 @@
 
 diesel::table! {
     article (id) {
-        id -> Varchar,
-        done -> Tinyint,
-        publishDate -> Varchar,
-        sectionId -> Varchar,
-        title -> Varchar,
+        id -> Text,
+        done -> Bool,
+        publishDate -> Text,
+        sectionId -> Text,
+        title -> Text,
     }
 }
 
 diesel::table! {
     article_comment (id) {
-        id -> Varchar,
+        id -> Text,
         content -> Text,
         likeCount -> Integer,
-        nickName -> Varchar,
-        articleId -> Nullable<Varchar>,
-        parentCommentId -> Nullable<Varchar>,
-    }
-}
-
-diesel::table! {
-    article_content (articleId) {
-        articleId -> Varchar,
-        content -> Mediumtext,
+        nickName -> Text,
+        articleId -> Nullable<Text>,
+        parentCommentId -> Nullable<Text>,
     }
 }
 
 diesel::table! {
     course (id) {
-        id -> Varchar,
-        brief -> Varchar,
-        teacherName -> Varchar,
-        teacherTitle -> Varchar,
-        image -> Varchar,
+        id -> Text,
+        brief -> Text,
+        teacherName -> Text,
+        teacherTitle -> Text,
+        image -> Text,
         articleCount -> Integer,
-        purchasedCount -> Varchar,
-        done -> Tinyint,
+        purchasedCount -> Text,
+        done -> Bool,
         price -> Integer,
-        title -> Varchar,
+        title -> Text,
     }
 }
 
 diesel::table! {
     course_description (courseId) {
-        courseId -> Varchar,
+        courseId -> Text,
         content -> Text,
     }
 }
 
 diesel::table! {
+    course_tend (courseId, userId) {
+        courseId -> Text,
+        userId -> Text,
+        #[sql_name = "type"]
+        type_ -> Text,
+    }
+}
+
+diesel::table! {
     section (id) {
-        id -> Varchar,
-        courseId -> Varchar,
-        title -> Varchar,
+        id -> Text,
+        courseId -> Text,
+        title -> Text,
+    }
+}
+
+diesel::table! {
+    user (id) {
+        id -> Text,
+        role -> Text,
     }
 }
 
 diesel::table! {
     user_role (id) {
-        user_id -> Varchar,
-        role -> Unsigned<Integer>,
-        created_at -> Unsigned<Bigint>,
-        valid_before -> Unsigned<Bigint>,
-        id -> Unsigned<Bigint>,
+        user_id -> Text,
+        role -> Integer,
+        created_at -> BigInt,
+        valid_before -> BigInt,
+        id -> Integer,
     }
 }
 
 diesel::table! {
     user_study_info (id) {
-        id -> Unsigned<Integer>,
-        course_id -> Varchar,
-        article_id -> Varchar,
-        last_study_at -> Unsigned<Bigint>,
+        id -> Integer,
+        course_id -> Text,
+        article_id -> Text,
+        last_study_at -> BigInt,
         study_percent -> Float,
-        user_id -> Varchar,
+        user_id -> Text,
     }
 }
 
 diesel::table! {
     ws_connect_info (id) {
         id -> Integer,
-        user_id -> Varchar,
-        start_at -> Unsigned<Bigint>,
-        end_at -> Unsigned<Bigint>,
+        user_id -> Text,
+        start_at -> BigInt,
+        end_at -> BigInt,
     }
 }
 
 diesel::joinable!(article -> section (sectionId));
 diesel::joinable!(article_comment -> article (articleId));
-diesel::joinable!(article_content -> article (articleId));
-diesel::joinable!(course_description -> course (courseId));
-diesel::joinable!(section -> course (courseId));
 diesel::joinable!(user_study_info -> article (article_id));
 diesel::joinable!(user_study_info -> course (course_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     article,
     article_comment,
-    article_content,
     course,
     course_description,
+    course_tend,
     section,
+    user,
     user_role,
     user_study_info,
     ws_connect_info,

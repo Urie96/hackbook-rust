@@ -18,7 +18,7 @@ pub enum ServerMessage {
 #[derive(Message)]
 #[rtype(usize)]
 pub struct Connect {
-    pub ws_session_id: usize,
+    //pub ws_session_id: usize,
     pub user_id: String,
     pub addr: Recipient<ServerMessage>,
 }
@@ -49,11 +49,11 @@ struct SessionInfo {
 pub struct WsServer {
     sessions: HashMap<usize, SessionInfo>,
     rng: ThreadRng,
-    repo: Repo,
+    repo: Arc<Repo>,
 }
 
 impl WsServer {
-    pub fn new(repo: Repo) -> WsServer {
+    pub fn new(repo: Arc<Repo>) -> WsServer {
         WsServer {
             sessions: HashMap::new(),
             rng: rand::thread_rng(),
@@ -116,12 +116,15 @@ impl Handler<Disconnect> for WsServer {
             println!("Removed session");
             println!("login count: {}", self.sessions.len());
 
-            self.repo.save_connect_info(&models::WsConnectInfo {
-                id: 0,
-                user_id: session.user_id,
-                start_at: msg.start_at.timestamp() as u64,
-                end_at: chrono::Utc::now().timestamp() as u64,
-            });
+            let _ = self
+                .repo
+                .save_connect_info(&models::WsConnectInfo {
+                    id: 0,
+                    user_id: session.user_id,
+                    start_at: msg.start_at.timestamp(),
+                    end_at: chrono::Utc::now().timestamp(),
+                })
+                .inspect_err(|e| eprintln!("failed to save connect info {e}"));
         }
     }
 }
@@ -141,14 +144,14 @@ impl Handler<GetArticleDetail> for WsServer {
             let section = self.repo.find_section_by_id(&article.section_id)?;
             let course = self.repo.find_course_by_id(&section.course_id)?;
             let mut res: pb::Article = article.into();
-            res.content = content.content;
+            res.content = content;
             res.section = Some(section.into());
             res.course = Some(course.into());
             if let Ok(info) = self.repo.find_user_study_info(&msg.user_id, "", &res.id) {
                 res.study_info = info.first().and_then(|info| {
                     Some(pb::StudyInfo {
                         percent: info.study_percent,
-                        last_study_at: info.last_study_at,
+                        last_study_at: info.last_study_at as u64,
                     })
                 });
             }

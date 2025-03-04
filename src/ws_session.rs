@@ -75,7 +75,7 @@ impl Actor for WsSession {
         let addr = ctx.address();
         self.addr
             .send(ws_server::Connect {
-                ws_session_id: self.id,
+                //ws_session_id: self.id,
                 user_id: self.user_id.to_owned(),
                 addr: addr.recipient(),
             })

@@ -44,7 +44,7 @@ async fn get_course_detail(
                     .find(|info| info.article_id == a.id)
                     .and_then(|info| {
                         Some(pb::StudyInfo {
-                            last_study_at: info.last_study_at,
+                            last_study_at: info.last_study_at as u64,
                             percent: info.study_percent,
                         })
                     });
@@ -289,7 +289,7 @@ pub async fn save_study_info(
         user_id: logged_user.id,
         article_id: req.article_id.to_owned(),
         course_id: req.course_id.to_owned(),
-        last_study_at: chrono::Utc::now().timestamp().unsigned_abs(),
+        last_study_at: chrono::Utc::now().timestamp(),
         study_percent: req.percent,
     };
     repo.save_study_info(&info)
@@ -300,8 +300,8 @@ pub async fn save_study_info(
 
 #[derive(Debug, Deserialize)]
 pub struct GetConnectSecQuery {
-    start_at_lt: u64,
-    start_at_gt: u64,
+    start_at_lt: i64,
+    start_at_gt: i64,
 }
 
 #[get("/connect_seconds")]

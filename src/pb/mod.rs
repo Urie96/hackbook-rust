@@ -8,7 +8,7 @@ impl From<models::Course> for Course {
         Course {
             article_count: course.article_count as u32,
             brief: course.brief,
-            done: course.done > 0,
+            done: course.done,
             id: course.id,
             image: course.image,
             price: course.price as u32,
@@ -47,7 +47,7 @@ impl From<models::Article> for Article {
     fn from(article: models::Article) -> Self {
         Article {
             id: article.id,
-            done: article.done > 0,
+            done: article.done,
             publish_date: article.publish_date,
             title: article.title,
             content: String::new(),
