@@ -36,12 +36,6 @@ CREATE TABLE IF NOT EXISTS "course" (
 	"title" VARCHAR(255) NOT NULL  ,
 	PRIMARY KEY ("id")
 );
-CREATE TABLE IF NOT EXISTS "course_description" (
-	"courseId" VARCHAR(255) NOT NULL  ,
-	"content" TEXT NOT NULL  ,
-	PRIMARY KEY ("courseId")
-);
-CREATE UNIQUE INDEX "REL_9b0571665a2fdd821fb8d3f6d0" ON "course_description" ("courseId");
 CREATE TABLE IF NOT EXISTS "course_tend" (
 	"courseId" VARCHAR(255) NOT NULL  ,
 	"userId" VARCHAR(255) NOT NULL  ,

@@ -1,7 +1,6 @@
 use {
     crate::schema::{
-        article, article_comment, course, course_description, section, user_role, user_study_info,
-        ws_connect_info,
+        article, article_comment, course, section, user_role, user_study_info, ws_connect_info,
     },
     diesel::{
         prelude::{Associations, Identifiable, Insertable, Queryable, QueryableByName},
@@ -51,17 +50,6 @@ pub struct Course {
     pub done: bool,
     pub price: i32,
     pub title: String,
-}
-
-#[derive(Identifiable, Debug, Queryable, Associations)]
-#[diesel(belongs_to(Course, foreign_key = courseId))]
-#[diesel(table_name = course_description)]
-#[diesel(primary_key(courseId))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct CourseDescription {
-    #[diesel(column_name = courseId)]
-    pub course_id: String,
-    pub content: String,
 }
 
 #[derive(Identifiable, Debug, Queryable, Associations)]

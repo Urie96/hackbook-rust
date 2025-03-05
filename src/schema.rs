@@ -37,13 +37,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    course_description (courseId) {
-        courseId -> Text,
-        content -> Text,
-    }
-}
-
-diesel::table! {
     course_tend (courseId, userId) {
         courseId -> Text,
         userId -> Text,
@@ -106,7 +99,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     article,
     article_comment,
     course,
-    course_description,
     course_tend,
     section,
     user,

@@ -15,7 +15,7 @@ use {
     },
 };
 
-#[get("/course/{course_id}")]
+#[get("/api/course/{course_id}")]
 async fn get_course_detail(
     repo: web::Data<Repo>,
     course_id: web::Path<String>,
@@ -64,7 +64,7 @@ pub struct ListCourseQuery {
     keyword: Option<String>,
 }
 
-#[get("/courses")]
+#[get("/api/courses")]
 async fn list_course(
     repo: web::Data<Repo>,
     query: web::Query<ListCourseQuery>,
@@ -91,7 +91,7 @@ async fn list_course(
     HttpResponse::Ok().protobuf(c)
 }
 
-#[get("/article/{article_id}/comments")]
+#[get("/api/article/{article_id}/comments")]
 async fn get_article_comments(
     repo: web::Data<Repo>,
     article_id: web::Path<String>,
@@ -114,7 +114,7 @@ async fn get_article_comments(
     })
 }
 
-#[get("/ws")]
+#[get("/api/ws")]
 async fn ws_start(
     req: HttpRequest,
     stream: web::Payload,
@@ -188,7 +188,7 @@ pub struct LoginQuery {
     return_to: String,
 }
 
-#[get("/login")]
+#[get("/api/login")]
 pub async fn login(
     // req: HttpRequest,
     id: Identity,
@@ -245,7 +245,7 @@ pub async fn login(
     // }
 }
 
-#[get("/me")]
+#[get("/api/me")]
 pub async fn get_me(
     mut logged_user: LoggedUser,
     id: Identity,
@@ -274,7 +274,7 @@ pub fn get_user_role(repo: &Repo, user_id: &str) -> UserRole {
     }
 }
 
-#[post("/study_info")]
+#[post("/api/study_info")]
 pub async fn save_study_info(
     logged_user: LoggedUser,
     repo: web::Data<Repo>,
@@ -304,7 +304,7 @@ pub struct GetConnectSecQuery {
     start_at_gt: i64,
 }
 
-#[get("/connect_seconds")]
+#[get("/api/connect_seconds")]
 pub async fn get_connect_seconds(
     logged_user: LoggedUser,
     repo: web::Data<Repo>,
@@ -325,7 +325,7 @@ pub async fn get_connect_seconds(
     Ok(HttpResponse::Ok().json(secs))
 }
 
-#[get("/test")]
+#[get("/api/test")]
 pub async fn test(
     _logged_user: LoggedUser,
     repo: web::Data<Repo>,

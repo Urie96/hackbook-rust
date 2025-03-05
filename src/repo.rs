@@ -1,6 +1,6 @@
 use {
     crate::models,
-    anyhow::Result,
+    anyhow::{Context, Result},
     diesel::{
         connection::SimpleConnection,
         prelude::*,
@@ -9,11 +9,12 @@ use {
         sql_types::{BigInt, Integer, VarChar},
         SqliteConnection,
     },
-    std::{env, time::Duration},
+    std::{env, fs, path::PathBuf, time::Duration},
 };
 
 pub struct Repo {
     pool: Pool<ConnectionManager<SqliteConnection>>,
+    storage_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -46,6 +47,7 @@ impl diesel::r2d2::CustomizeConnection<SqliteConnection, diesel::r2d2::Error>
 impl Repo {
     pub fn new() -> Self {
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        let storage = env::var("STORAGE_PATH").expect("STORAGE_PATH must be set");
 
         let pool = Pool::builder()
             .max_size(2)
@@ -57,7 +59,12 @@ impl Repo {
             .build(ConnectionManager::<SqliteConnection>::new(database_url))
             .unwrap();
 
-        Repo { pool }
+        let storage_path = PathBuf::from(&storage);
+        if !storage_path.is_dir() {
+            panic!("{storage} is not a dir");
+        }
+
+        Repo { pool, storage_path }
     }
 
     pub fn find_section_by_id(&self, id: &str) -> Result<models::Section> {
@@ -98,10 +105,11 @@ impl Repo {
 
         let sections = models::Section::belonging_to(&one_course).load::<models::Section>(conn)?;
 
-        let desc = models::CourseDescription::belonging_to(&one_course)
-            .first::<models::CourseDescription>(conn)
-            .ok()
-            .map(|c| c.content);
+        let desc = fs::read_to_string(
+            self.storage_path
+                .join(format!("courses/{}.html", one_course.id)),
+        )
+        .ok();
 
         let articles = models::Article::belonging_to(&sections)
             .load::<models::Article>(conn)?
@@ -177,8 +185,11 @@ OFFSET
         let art = dsl::article
             .filter(dsl::id.eq(id))
             .first::<models::Article>(conn)?;
+        let file_path = self.storage_path.join(format!("contents/{id}.html"));
+        let content = fs::read_to_string(&file_path)
+            .context(format!("{} not exist", file_path.to_string_lossy()))?;
 
-        Ok((art, "content".to_string()))
+        Ok((art, content))
     }
 
     pub fn find_comments_by_article_id(

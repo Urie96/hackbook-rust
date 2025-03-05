@@ -2,7 +2,6 @@
 DROP TABLE "article";
 DROP TABLE "article_comment";
 DROP TABLE "course";
-DROP TABLE "course_description";
 DROP TABLE "course_tend";
 DROP TABLE "section";
 DROP TABLE "user";
