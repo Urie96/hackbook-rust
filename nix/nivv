@@ -1,0 +1,545 @@
+#!/usr/bin/env python
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Dict, Literal, Mapping, Optional
+
+import tomllib
+
+
+@dataclass
+class GithubSpec:
+    repo: str
+    url: Optional[str]
+    branch: Optional[str]
+    rev: Optional[str]
+
+
+@dataclass
+class GithubReleaseSpec:
+    repo: str
+    url: str
+
+
+@dataclass
+class GithubTagSpec:
+    repo: str
+    url: Optional[str]
+
+
+@dataclass
+class GitSpec:
+    repo: str
+    url: str
+    branch: Optional[str]
+
+
+@dataclass
+class PypiSpec:
+    package: str
+    version: Optional[str]
+    wheel: Optional[bool]
+
+
+@dataclass
+class NpmSpec:
+    package: str
+    version: Optional[str]
+
+
+@dataclass
+class DockerSpec:
+    image: str
+
+
+@dataclass
+class Spec:
+    github_release: Optional[GithubReleaseSpec]
+    github: Optional[GithubSpec]
+    github_tag: Optional[GithubTagSpec]
+    git: Optional[GitSpec]
+    pypi: Optional[PypiSpec]
+    npm: Optional[NpmSpec]
+    docker: Optional[DockerSpec]
+
+    pinned: Optional[bool]
+    hash_path: Optional[str]
+
+
+def colorize(text: str, code: int, *, bright: bool = False) -> str:
+    if bright:
+        code += 60  # 90~97 是高亮前景色
+    return f"\033[{code}m{text}\033[0m"
+
+
+def green(text: str, *, bright: bool = False) -> str:
+    return colorize(text, 32, bright=bright)
+
+
+def red(text: str, *, bright: bool = False) -> str:
+    return colorize(text, 31, bright=bright)
+
+
+def yellow(text: str, *, bright: bool = False) -> str:
+    return colorize(text, 33, bright=bright)
+
+
+def http_get(url: str, **kwargs) -> str:
+    req = urllib.request.Request(url, **kwargs)
+    with urllib.request.urlopen(req) as resp:
+        return resp.read().decode()
+
+
+def call_github_api(path: str) -> Mapping:
+    headers = {"Accept": "application/vnd.github+json"}
+    github_token = os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        headers["Authorization"] = f"token {github_token}"
+
+    resp = http_get(f"https://api.github.com{path}", headers=headers)
+    data = json.loads(resp)
+    return data
+
+
+def github_latest_release_tag(repo: str) -> str:
+    return call_github_api(f"/repos/{repo}/releases/latest")["tag_name"]
+
+
+def execute(*command):
+    try:
+        print("Running command:", " ".join(command))
+        result = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            # stderr=subprocess.STDOUT,
+            check=True,
+            text=True,
+        )
+        return result.stdout
+    except subprocess.CalledProcessError as e:
+        print(e.output)
+        exit(1)
+
+
+def github_latest_rev(repo: str, branch: Optional[str]):
+    if branch is None:
+        branch = "HEAD"
+    return call_github_api(f"/repos/{repo}/commits/{branch}")["sha"]
+
+
+def git_latest_rev(repo_url: str, branch: Optional[str]):
+    if branch is None:
+        branch = "HEAD"
+    stdout = execute("git", "ls-remote", repo_url, branch)
+    if not stdout:
+        raise Exception(f"无法获取{repo_url}的最新版本")
+    return stdout and stdout.split()[0]
+
+
+def git_latest_tag_rev(repo_url: str):
+    stdout = execute("git", "ls-remote", "--tags", "--sort=-v:refname", repo_url)
+    first_line = stdout.split("\n", 2)[0]
+    m = re.match(r"^([0-9a-f]{40})\s+refs\/tags\/(.+)$", first_line)
+    if not m:
+        raise Exception(f"无法获取{repo_url}的最新tag")
+    commit_hash, tag = m.groups()
+    return tag, commit_hash
+
+
+def get_docker_index_digest(image: str, tag: str) -> str:
+    stdout = execute("skopeo", "inspect", "--raw", f"docker://{image}:{tag}").strip()
+    digest = "sha256:" + hashlib.sha256(stdout.encode()).hexdigest()
+    return digest
+
+
+def sanitize_name(name: str) -> str:
+    name = re.sub(r"^\.*", "", name)
+    parts = re.split(r"[^A-Za-z0-9+._?=-]+", name)
+    return "-".join(parts)
+
+
+def get_hash_of_url(name: str, url: str, *, unpack: bool = False):
+    cmd = ["nix-prefetch-url", url, "--name", sanitize_name(name) + "-src"]
+    if unpack:
+        cmd.append("--unpack")
+    sha256 = execute(*cmd).strip()
+    if bool(re.fullmatch(r"^[0123456789abcdfghijklmnpqrsvwxyz]{52}$", sha256)):
+        return sha256
+    else:
+        raise Exception(f"无法获取{url}的sha256")
+
+
+def detect_type_from_url(url: str) -> Literal["tarball", "file"]:
+    tarball_extensions = {
+        ".tar",
+        ".tar.gz",
+        ".tgz",
+        ".tar.bz2",
+        ".tbz2",
+        ".tar.xz",
+        ".txz",
+    }
+    path = urllib.parse.urlparse(url).path.lower()
+    return (
+        "tarball" if any(path.endswith(ext) for ext in tarball_extensions) else "file"
+    )
+
+
+def niv_add(name: str, url: str, extra: Mapping[str, Optional[str]] = {}):
+    with SourcesJson() as sources:
+        old_url = None
+        old_sha256 = None
+        if name not in sources:
+            print(green(f"Adding [{name}]"))
+        else:
+            old_url = sources[name].get("url", None)
+            old_sha256 = sources[name].get("sha256", None)
+
+        sources[name] = {
+            "url": url,
+            "name": name,
+            "type": detect_type_from_url(url),
+            "sha256": old_sha256 or "",
+        }
+        source = sources[name]
+        if old_url != url:
+            print(yellow(f"Updating [{name}] to {url}"))
+            unpack = source["type"] == "tarball"
+            source["sha256"] = get_hash_of_url(name, url, unpack=unpack)
+
+        for k, v in extra.items():
+            if v == "" or v is None:
+                continue
+            source[k] = v
+
+
+def build_url(url: str, extra: Mapping[str, Optional[str]]):
+    for k, v in extra.items():
+        url = url.replace(f"<{k}>", v or "")
+    return url
+
+
+def nivv_github(name: str, github: GithubSpec):
+    rev = github.rev or github_latest_rev(github.repo, github.branch)
+    owner, repo_name = github.repo.split("/")
+    extra = {
+        "owner": owner,
+        "repo": repo_name,
+        "rev": rev,
+        "version": github.branch or rev,
+    }
+    final_url = build_url(
+        github.url or "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz", extra
+    )
+    niv_add(name, final_url, extra)
+
+
+def get_hash_from_nix_build(hash_path: str):
+    command = ["nix-build", "--no-link", "-A", "pkgs." + hash_path]
+    with subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as proc:
+        assert proc.stderr
+        hash_value: Optional[str] = None
+        for line in proc.stderr:
+            print(line, end="")
+            match = re.search(r"^\s*got:\s*(sha256-[A-Za-z0-9+/=]+)\s*$", line)
+            if match:
+                hash_value = match.group(1)
+        proc.wait()
+        return hash_value
+
+
+def nivv_github_tag(name: str, spec: GithubTagSpec):
+    git_repo = f"https://github.com/{spec.repo}.git"
+    tag, rev = git_latest_tag_rev(git_repo)
+    owner, repo_name = spec.repo.split("/")
+    extra = {"owner": owner, "repo": repo_name, "rev": rev, "version": tag}
+    final_url = build_url(
+        spec.url or "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz", extra
+    )
+    niv_add(name, final_url, extra)
+
+
+def nivv_github_release(name: str, spec: GithubReleaseSpec):
+    version = github_latest_release_tag(spec.repo)
+    owner, repo_name = spec.repo.split("/")
+    extra = {"version": version, "owner": owner, "repo": repo_name}
+    final_url = build_url(spec.url, extra)
+    niv_add(name, final_url, extra)
+
+
+def nivv_git(name: str, spec: GitSpec):
+    rev = git_latest_rev(spec.repo, spec.branch)
+    extra = {"rev": rev, "version": spec.branch or rev}
+    final_url = build_url(spec.url, extra)
+    niv_add(name, final_url, extra)
+
+
+def pypi_latest_version(package: str):
+    resp = http_get(f"https://pypi.org/pypi/{package}/json")
+    return json.loads(resp)["info"]["version"]
+
+
+def nivv_pypi(name: str, spec: PypiSpec):
+    version = spec.version or pypi_latest_version(spec.package)
+    extra = {"version": version}
+    if spec.wheel:
+        extra["format"] = "wheel"
+    final_url = (
+        f"https://files.pythonhosted.org/packages/py3/{spec.package[:1]}/{spec.package}/{spec.package}-{version}-py3-none-any.whl"
+        if spec.wheel
+        else f"https://files.pythonhosted.org/packages/source/{spec.package[:1]}/{spec.package}/{spec.package}-{version}.tar.gz"
+    )
+    niv_add(name, final_url, extra)
+
+
+def npm_latest_version(package: str):
+    # npm info NeteaseCloudMusicApi version
+    resp = http_get(
+        f"https://registry.npmjs.org/{package}",
+        headers={
+            "Accept": "application/vnd.npm.install-v1+json",
+            "Range": "bytes=0-1023",
+        },
+    )
+    res = re.search('"dist-tags":({.*?})', resp)
+    assert res
+    dist_tags = json.loads(res.group(1))
+    version = dist_tags["latest"]
+    return version
+
+
+def nivv_npm(name: str, spec: NpmSpec):
+    version = spec.version or npm_latest_version(spec.package)
+    extra = {"version": version}
+    final_url = f"https://registry.npmjs.org/{spec.package}/-/{spec.package.split('/')[-1]}-{version}.tgz"
+    niv_add(name, final_url, extra)
+
+
+def calc_docker_image_hash(
+    image_name: str, index_digest: str, final_tag: str, os: str, arch: str
+) -> str:
+    resp = execute(
+        "nix-prefetch-docker",
+        "--final-image-tag",
+        final_tag,
+        "--json",
+        "--os",
+        os,
+        "--arch",
+        arch,
+        image_name,
+        index_digest,
+    )
+    return json.loads(resp)["hash"]
+
+
+def nivv_docker(name: str, spec: DockerSpec):
+    splits = spec.image.split(":", 2)
+    image_name = splits[0]
+    tag = "latest" if len(splits) == 1 else splits[1]
+    index_digest = get_docker_index_digest(image_name, tag)
+    with SourcesJson() as sources:
+        old_index_digest = None
+        old_sha256 = None
+        if name not in sources:
+            print(green(f"Adding [{name}]"))
+        else:
+            old_index_digest = sources[name].get("index_digest", None)
+            old_sha256 = sources[name].get("sha256", None)
+
+        sources[name] = {
+            "name": name,
+            "imageDigest": index_digest,
+            "sha256": old_sha256 or "",
+            "imageName": image_name,
+            "finalImageName": image_name,
+            "finalImageTag": tag,
+            "os": "linux",
+            "arch": "amd64",
+            "type": "docker-image",
+        }
+        source = sources[name]
+        if old_index_digest != index_digest:
+            print(yellow(f"Updating [{name}] to {index_digest}"))
+            source["sha256"] = calc_docker_image_hash(
+                image_name, index_digest, tag, source["os"], source["arch"]
+            )
+
+
+class SafeNamespace(SimpleNamespace):
+    def __getattr__(self, name):
+        """访问不存在的属性时返回 None"""
+        return None
+
+    def __getitem__(self, name):
+        """支持字典式的访问，不存在时返回 None"""
+        return getattr(self, name, None)
+
+
+def dict_to_namespace(data):
+    if isinstance(data, dict):
+        return SafeNamespace(**{k: dict_to_namespace(v) for k, v in data.items()})
+    elif isinstance(data, list):
+        return [dict_to_namespace(item) for item in data]
+    else:
+        return data
+
+
+def get_config() -> Mapping[str, Spec]:
+    config_path = "config.toml"
+    with open(config_path, "rb") as f:
+        specMap = {}
+        for k, v in tomllib.load(f).items():
+            spec = Spec(
+                github=None,
+                github_release=None,
+                github_tag=None,
+                git=None,
+                pypi=None,
+                npm=None,
+                docker=None,
+                pinned=v.pop("pinned", False),
+                hash_path=v.pop("hash_path", None),
+            )
+            specMap[k] = spec
+            if "github" in v:
+                spec.github = GithubSpec(
+                    repo=v.pop("github"),
+                    url=v.pop("url", None),
+                    branch=v.pop("branch", None),
+                    rev=v.pop("rev", None),
+                )
+            elif "github_release" in v:
+                spec.github_release = GithubReleaseSpec(
+                    repo=v.pop("github_release"),
+                    url=v.pop("url", None),
+                )
+            elif "github_tag" in v:
+                spec.github_tag = GithubTagSpec(
+                    repo=v.pop("github_tag"),
+                    url=v.pop("url", None),
+                )
+            elif "git" in v:
+                spec.git = GitSpec(
+                    repo=v.pop("git"),
+                    url=v.pop("url", None),
+                    branch=v.pop("branch", None),
+                )
+            elif "pypi" in v:
+                spec.pypi = PypiSpec(
+                    package=v.pop("pypi"),
+                    version=v.pop("version", None),
+                    wheel=v.pop("wheel", None),
+                )
+            elif "npm" in v:
+                spec.npm = NpmSpec(
+                    package=v.pop("npm"),
+                    version=v.pop("version", None),
+                )
+            elif "image" in v:
+                spec.docker = DockerSpec(
+                    image=v.pop("image"),
+                )
+            else:
+                print(red(f"Unknown type for {k}"))
+                exit(1)
+
+            if len(v) > 0:
+                print(red(f"Unknown options {', '.join(v.keys())} for {k}"))
+                exit(1)
+
+        return specMap
+
+
+def update_vendor_hash(name: str, hash_path: str):
+    hash = get_hash_from_nix_build(hash_path)
+    print("vendor hash: ", hash)
+    if not hash:
+        return
+    with SourcesJson() as source:
+        src = source[name]
+        print(green(f"Updating [{name}] vendor hash to {hash}"))
+        src["vendor_hash"] = hash
+
+
+def update_by_spec(name: str, spec: Spec):
+    if spec.github:
+        nivv_github(name, spec.github)
+    elif spec.github_release:
+        nivv_github_release(name, spec.github_release)
+    elif spec.github_tag:
+        nivv_github_tag(name, spec.github_tag)
+    elif spec.git:
+        nivv_git(name, spec.git)
+    elif spec.pypi:
+        nivv_pypi(name, spec.pypi)
+    elif spec.npm:
+        nivv_npm(name, spec.npm)
+    elif spec.docker:
+        nivv_docker(name, spec.docker)
+
+    # update hash
+    if spec.hash_path:
+        update_vendor_hash(name, spec.hash_path)
+
+
+class SourcesJson:
+    def __init__(self):
+        self.path = "sources.json"
+        self.data = {}
+        if not os.path.exists(self.path):
+            self.data = {}
+        else:
+            with open(self.path, "r", encoding="utf-8") as f:
+                data: Dict[str, Dict[str, str]] = json.load(f)
+                self.data = data
+
+    def __enter__(self):
+        return self.data
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(self.data, f, indent=2, sort_keys=True)
+
+
+def sync_all(config: Mapping[str, Spec]):
+    with SourcesJson() as sources:
+        for name in list(sources.keys()):
+            if name not in config:
+                print(red(f"Deleting [{name}]", bright=True))
+                del sources[name]
+
+    for name, spec in config.items():
+        if name in sources and spec.pinned:
+            continue
+        update_by_spec(name, spec)
+
+
+def main():
+    config = get_config()
+
+    if len(sys.argv) > 1:
+        name = sys.argv[1].strip()
+        assert name in config
+        update_by_spec(name, config[name])
+    else:
+        sync_all(config)
+
+
+if __name__ == "__main__":
+    main()
+

@@ -1,0 +1,29 @@
+[nixpkgs]
+github = "NixOS/nixpkgs"
+branch = "nixos-unstable"
+
+[rust-overlay]
+github = "oxalica/rust-overlay"
+
+[arduino-nix]
+github = "bouk/arduino-nix"
+
+[arduino-indexes]
+github = "bouk/arduino-indexes"
+
+[zephyr-nix]
+github = "nix-community/zephyr-nix"
+
+[pyproject-nix]
+github = "pyproject-nix/pyproject.nix"
+
+[zephyr]
+github = "zephyrproject-rtos/zephyr"
+branch = "v4.2.0"
+
+[nixpkgs-esp-dev]
+github = "mirrexagon/nixpkgs-esp-dev"
+
+[qoi-conv]
+pypi = "qoi-conv"
+

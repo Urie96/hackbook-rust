@@ -1,0 +1,446 @@
+#!/usr/bin/env python3
+"""
+将HTML文章转换为Markdown并生成EPUB（带图片压缩）
+
+功能：
+1. HTML 转 Markdown
+2. 图片压缩（灰度、尺寸限制）
+3. 生成 EPUB
+
+图片处理：
+- 压缩后的图片放到每个 section 的 images 子目录中
+- PNG/JPEG 都会压缩，并转换为灰度
+- 最大尺寸不超过 Kindle Paperwhite 3 (1072 x 1448)
+
+使用方法：
+    python3 convert_to_epub.py                    # 转换所有课程并生成 epub
+    python3 convert_to_epub.py -c G100001901     # 只转换指定课程
+"""
+
+import os
+import re
+import sqlite3
+import subprocess
+import argparse
+import shutil
+from pathlib import Path
+from bs4 import BeautifulSoup
+
+# Kindle Paperwhite 3 屏幕尺寸
+MAX_WIDTH = 1072
+MAX_HEIGHT = 1448
+
+# 压缩质量
+JPEG_QUALITY = 50
+
+# 图片压缩阈值（小于此大小的图片不压缩，设为0则压缩所有）
+SIZE_THRESHOLD = 100
+
+# 路径配置
+SCRIPT_DIR = Path(__file__).parent.resolve()
+STORAGE_DIR = SCRIPT_DIR.parent / "storage"
+DB_PATH = STORAGE_DIR / "hackbook.db"
+CONTENTS_DIR = STORAGE_DIR / "contents"
+OUTPUT_DIR = STORAGE_DIR / "markdown"
+IMAGES_DIR = STORAGE_DIR / "images"
+
+
+def sanitize_filename(name):
+    """清理文件名"""
+    illegal_chars = r'[<>:"/\\|?*]'
+    name = re.sub(illegal_chars, "_", name)
+    name = name.strip(". ")
+    return name if name else "unnamed"
+
+
+def compress_image_magick(src_path: Path, dest_path: Path) -> bool:
+    """使用 ImageMagick 压缩图片，统一转为 JPG"""
+    if not src_path.exists():
+        return False
+
+    file_size = src_path.stat().st_size
+    if file_size < SIZE_THRESHOLD:
+        shutil.copy2(src_path, dest_path)
+        return False
+
+    # 统一转为 JPG 格式
+    dest_path = dest_path.with_suffix(".jpg")
+
+    try:
+        cmd = [
+            "magick", str(src_path),
+            "-resize", f"{MAX_WIDTH}x{MAX_HEIGHT}",
+            "-colorspace", "Gray",
+            "-quality", str(JPEG_QUALITY),
+            str(dest_path)
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"        magick error: {result.stderr}")
+            shutil.copy2(src_path, dest_path)
+            return False
+
+        return True
+    except Exception as e:
+        print(f"        exception: {e}")
+        shutil.copy2(src_path, dest_path)
+        return False
+
+
+def preprocess_html(html_content: str, article_title: str, course_images_dir: Path) -> str:
+    """预处理HTML：压缩图片、调整标题"""
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    # 处理图片
+    for img in soup.find_all("img"):
+        src = img.get("src", "")
+        if not src:
+            continue
+
+        # 提取文件名
+        if src.startswith("/images/"):
+            filename = src[len("/images/"):]
+        elif src.startswith("./images/"):
+            filename = src[len("./images/"):]
+        else:
+            filename = os.path.basename(src)
+
+        original_path = IMAGES_DIR / filename
+
+        if original_path.exists():
+            # 统一转为 jpg，去掉原始扩展名
+            filename_base = Path(filename).stem
+            dest_filename = f"{filename_base}.jpg"
+            dest_path = course_images_dir / dest_filename
+            course_images_dir.mkdir(parents=True, exist_ok=True)
+
+            compress_image_magick(original_path, dest_path)
+            # 图片在课程的 images 子目录
+            img["src"] = f"images/{dest_filename}"
+        else:
+            print(f"      Warning: image not found: {original_path}")
+
+    # 标题降级
+    for i in range(6, 0, -1):
+        for tag in soup.find_all(f"h{i}"):
+            tag.name = f"h{i + 1}"
+
+    # 插入标题
+    title_tag = soup.new_tag("h1")
+    title_tag.string = article_title
+    if soup.body:
+        soup.body.insert(0, title_tag)
+    else:
+        soup.insert(0, title_tag)
+
+    return str(soup)
+
+
+def html_to_markdown(html_content: str) -> str:
+    """使用pandoc将HTML转换为Markdown"""
+    try:
+        result = subprocess.run(
+            ["pandoc", "-f", "html+tex_math_dollars", "-t", "markdown+tex_math_dollars", "--wrap=none"],
+            input=html_content,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout
+    except subprocess.CalledProcessError:
+        return html_content
+
+
+def get_course_info(course_id: str) -> dict:
+    """获取课程信息"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT title FROM course WHERE id = ?", (course_id,))
+    row = cursor.fetchone()
+    if not row:
+        print(f"Error: course with id '{course_id}' not found")
+        sys.exit(1)
+
+    course_title = row["title"]
+
+    cursor.execute("SELECT brief, teacherName, image FROM course WHERE id = ?", (course_id,))
+    row = cursor.fetchone()
+
+    conn.close()
+
+    return {
+        "title": course_title,
+        "brief": row["brief"] or "",
+        "teacher_name": row["teacherName"] or "",
+        "image": row["image"] or "",
+    }
+
+
+def get_sections_by_course(course_id: str) -> list:
+    """获取课程的所有章节"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id, title FROM section WHERE courseId = ?", (course_id,))
+    sections = cursor.fetchall()
+
+    result = []
+    for section in sections:
+        match = re.search(r"(\d+)", section["id"])
+        num = int(match.group(1)) if match else 0
+        result.append({"id": section["id"], "title": section["title"], "num": num})
+
+    conn.close()
+    result.sort(key=lambda x: x["num"])
+
+    for idx, s in enumerate(result, 1):
+        s["order"] = idx
+
+    return result
+
+
+def get_articles_by_section(section_id: str) -> list:
+    """获取章节的所有文章"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id, title FROM article WHERE sectionId = ?", (section_id,))
+    articles = cursor.fetchall()
+
+    result = []
+    for article in articles:
+        title_match = re.match(r"(\d+)\s*[|:：]", article["title"])
+        if title_match:
+            num = int(title_match.group(1))
+        else:
+            id_match = re.search(r"[LG]?(\d+)", article["id"])
+            num = int(id_match.group(1)) if id_match else 999999
+
+        result.append({"id": article["id"], "title": article["title"], "num": num})
+
+    conn.close()
+    result.sort(key=lambda x: x["num"])
+    return result
+
+
+def cmp_to_key(mycmp):
+    class K:
+        __slots__ = ["obj"]
+        def __init__(self, obj):
+            self.obj = obj
+        def __lt__(self, other):
+            return mycmp(self.obj, other.obj) < 0
+        def __gt__(self, other):
+            return mycmp(self.obj, other.obj) > 0
+        def __eq__(self, other):
+            return mycmp(self.obj, other.obj) == 0
+        def __le__(self, other):
+            return mycmp(self.obj, other.obj) <= 0
+        def __ge__(self, other):
+            return mycmp(self.obj, other.obj) >= 0
+        def __ne__(self, other):
+            return mycmp(self.obj, other.obj) != 0
+    return K
+
+
+def convert_course(course_info: dict) -> tuple:
+    """转换单个课程，返回 (files, work_dir)"""
+    course_id = course_info["id"]
+    course_title = course_info["title"]
+
+    print(f"\n处理课程: {course_title} (ID: {course_id})")
+
+    course_dir = OUTPUT_DIR / sanitize_filename(course_title)
+    course_dir.mkdir(parents=True, exist_ok=True)
+
+    # 课程图片目录
+    course_images_dir = course_dir / "images"
+
+    sections = get_sections_by_course(course_id)
+    print(f"  找到 {len(sections)} 个章节")
+
+    section_map = {}
+    all_articles = []
+
+    for section in sections:
+        section_id = section["id"]
+        section_title = section["title"] or "全部文章"
+
+        section_name = sanitize_filename(section_title)
+        section_dir = course_dir / section_name
+        section_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"  处理章节: {section_title}")
+
+        articles = get_articles_by_section(section_id)
+        print(f"    找到 {len(articles)} 篇文章")
+
+        section_map[section_id] = section_name
+
+        for article in articles:
+            article_id = article["id"]
+            article_title = article["title"]
+
+            html_file = CONTENTS_DIR / f"{article_id}.html"
+            if not html_file.exists():
+                print(f"      跳过: {article_title} - 没有HTML文件")
+                continue
+
+            with open(html_file, "r", encoding="utf-8") as f:
+                html_content = f.read()
+
+            # 预处理（压缩图片）
+            html_content = preprocess_html(html_content, article_title, course_images_dir)
+
+            # 转换为 markdown
+            markdown_content = html_to_markdown(html_content).rstrip()
+
+            # 写入文件
+            article_filename = sanitize_filename(article_title) + ".md"
+            article_path = section_dir / article_filename
+
+            with open(article_path, "w", encoding="utf-8") as f:
+                f.write(markdown_content)
+
+            print(f"    已转换: {article_title}")
+
+            all_articles.append({
+                "id": article_id,
+                "title": article_title,
+                "sectionId": section_id,
+                "filename": article_filename
+            })
+
+    # 生成 toc.txt
+    def compare_articles(a, b):
+        a_has_num = re.match(r"^(\d+)\s*[|:：]", a["title"])
+        b_has_num = re.match(r"^(\d+)\s*[|:：]", b["title"])
+        a_num = int(re.search(r"(\d+)", a["id"]).group(1)) if re.search(r"(\d+)", a["id"]) else 999999
+        b_num = int(re.search(r"(\d+)", b["id"]).group(1)) if re.search(r"(\d+)", b["id"]) else 999999
+
+        if a_has_num and b_has_num:
+            return int(a_has_num.group(1)) - int(b_has_num.group(1))
+        elif a_has_num:
+            return a_num - b_num
+        elif b_has_num:
+            return a_num - b_num
+        else:
+            return a_num - b_num
+
+    all_articles.sort(key=cmp_to_key(compare_articles))
+
+    toc_path = course_dir / "toc.txt"
+    with open(toc_path, "w", encoding="utf-8") as f:
+        for article in all_articles:
+            section_name = section_map[article["sectionId"]]
+            toc_item = f"{section_name}/{article['filename']}"
+            f.write(toc_item + "\n")
+
+    print(f"  生成目录: toc.txt ({len(all_articles)} 篇文章)")
+
+    # 返回文件列表
+    files = [f"{section_map[a['sectionId']]}/{a['filename']}" for a in all_articles]
+
+    return files, course_dir
+
+
+def generate_epub(course_info: dict, files: list, work_dir: Path) -> Path:
+    """生成 epub"""
+    epub_path = work_dir / f"{course_info['title']}.epub"
+
+    # 封面图片
+    cover_path = None
+    if course_info.get("image"):
+        cover_filename = Path(course_info["image"]).name
+        cover_path = IMAGES_DIR / cover_filename
+
+    cmd = [
+        "pandoc",
+        *files,
+        "-o", str(epub_path),
+        "--toc", "--toc-depth=1",
+        "--resource-path", ".",
+        "--mathml",
+        "--metadata", f"title={course_info['title']}",
+        "--metadata", f"creator={course_info['teacher_name']}",
+        "--metadata", "language=zh-CN",
+        "--metadata", f"description={course_info['brief']}",
+    ]
+
+    if cover_path and cover_path.exists():
+        cmd.append("--epub-cover-image")
+        cmd.append(str(cover_path))
+
+    print("  生成 EPUB...")
+    result = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        print(f"  Error: pandoc failed:")
+        print(result.stderr)
+        sys.exit(1)
+
+    # 打印 pandoc 的 stdout（可能有警告）
+    if result.stdout:
+        print(f"  pandoc output: {result.stdout}")
+
+    return epub_path
+
+
+def main():
+    parser = argparse.ArgumentParser(description="将HTML转换为Markdown并生成EPUB")
+    parser.add_argument("-c", "--course-id", type=str, help="指定课程ID")
+    parser.add_argument("--skip-epub", action="store_true", help="只转换markdown，不生成epub")
+    args = parser.parse_args()
+
+    if not DB_PATH.exists():
+        print(f"Error: database file '{DB_PATH}' not found")
+        return
+
+    if not CONTENTS_DIR.exists():
+        print(f"Error: contents directory '{CONTENTS_DIR}' not found")
+        return
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 获取课程列表
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    if args.course_id:
+        cursor.execute("SELECT id, title FROM course WHERE id = ?", (args.course_id,))
+        courses = cursor.fetchall()
+        if not courses:
+            print(f"Error: course '{args.course_id}' not found")
+            return
+    else:
+        cursor.execute("SELECT id, title FROM course")
+        courses = cursor.fetchall()
+
+    conn.close()
+
+    print(f"找到 {len(courses)} 个课程")
+
+    for course in courses:
+        course_id = course["id"]
+        course_info = get_course_info(course_id)
+        course_info["id"] = course_id
+
+        # 转换并生成
+        files, work_dir = convert_course(course_info)
+
+        if not args.skip_epub:
+            epub_path = generate_epub(course_info, files, work_dir)
+            print(f"  EPUB: {epub_path} ({epub_path.stat().st_size / 1024 / 1024:.2f} MB)")
+
+    print("\n完成!")
+
+
+if __name__ == "__main__":
+    import sys
+    main()

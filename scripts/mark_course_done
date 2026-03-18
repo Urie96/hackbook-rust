@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""
+检查专栏的所有文章内容是否都已下载，如果是，则标记该专栏为完成状态。
+"""
+
+import sqlite3
+from pathlib import Path
+import logging
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
+class CourseDoneMarker:
+    """专栏完成状态标记器"""
+
+    def __init__(self, db_path: str = "storage/hackbook.db"):
+        # 获取数据库路径
+        base_dir = Path(__file__).parent.parent
+        self.db_path = str(base_dir / db_path)
+        self.storage_contents = base_dir / "storage" / "contents"
+        logger.info(f"数据库路径: {self.db_path}")
+        logger.info(f"内容存储路径: {self.storage_contents}")
+
+    def get_connection(self):
+        """获取数据库连接"""
+        return sqlite3.connect(self.db_path)
+
+    def check_article_content_exists(self, article_id: str) -> bool:
+        """检查文章内容文件是否存在"""
+        content_file = self.storage_contents / f"{article_id}.html"
+        return content_file.exists()
+
+    def get_article_status(self, article_id: str) -> dict:
+        """获取文章的状态"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT done FROM article WHERE id = ?", (article_id,))
+            row = cursor.fetchone()
+            if row:
+                return {"id": article_id, "done": row[0]}
+            return None
+        finally:
+            conn.close()
+
+    def mark_article_done(self, article_id: str) -> bool:
+        """标记文章为完成状态"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE article
+                SET done = 1
+                WHERE id = ?
+            """, (article_id,))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"✗ 标记文章 {article_id} 失败: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def get_course_articles(self, course_id: str) -> list:
+        """获取专栏的所有文章ID"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            # 通过 section 查找所有文章
+            cursor.execute("""
+                SELECT a.id
+                FROM article a
+                INNER JOIN section s ON a.sectionId = s.id
+                WHERE s.courseId = ?
+                ORDER BY a.id
+            """, (course_id,))
+            return [row[0] for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_all_courses(self) -> list:
+        """获取所有专栏"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, title, done, articleCount
+                FROM course
+                ORDER BY title
+            """)
+            return [
+                {
+                    "id": row[0],
+                    "title": row[1],
+                    "done": row[2],
+                    "articleCount": row[3]
+                }
+                for row in cursor.fetchall()
+            ]
+        finally:
+            conn.close()
+
+    def mark_course_done(self, course_id: str) -> bool:
+        """标记专栏为完成状态"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE course
+                SET done = 1
+                WHERE id = ?
+            """, (course_id,))
+            conn.commit()
+            logger.info(f"✓ 已标记专栏 {course_id} 为完成状态")
+            return True
+        except Exception as e:
+            logger.error(f"✗ 标记专栏 {course_id} 失败: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def mark_course_undone(self, course_id: str) -> bool:
+        """取消专栏的完成状态"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE course
+                SET done = 0
+                WHERE id = ?
+            """, (course_id,))
+            conn.commit()
+            logger.info(f"✓ 已取消专栏 {course_id} 的完成状态")
+            return True
+        except Exception as e:
+            logger.error(f"✗ 取消专栏 {course_id} 完成状态失败: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def check_and_mark_course(self, course_id: str, dry_run: bool = False) -> dict:
+        """检查专栏的所有文章是否都已下载，如果是则标记为完成"""
+        articles = self.get_course_articles(course_id)
+
+        if not articles:
+            logger.warning(f"专栏 {course_id} 没有任何文章")
+            return {
+                "course_id": course_id,
+                "total": 0,
+                "downloaded": 0,
+                "all_downloaded": False,
+                "marked": False,
+                "articles_marked": 0
+            }
+
+        total = len(articles)
+        downloaded = 0
+        articles_marked = 0
+
+        # 检查每篇文章并标记已下载的
+        for article_id in articles:
+            exists = self.check_article_content_exists(article_id)
+            if exists:
+                downloaded += 1
+                # 检查文章当前状态
+                status = self.get_article_status(article_id)
+                if status and status["done"] == 0:
+                    # 文件存在但未标记，标记为完成
+                    if not dry_run:
+                        if self.mark_article_done(article_id):
+                            articles_marked += 1
+                    else:
+                        articles_marked += 1
+                        logger.info(f"  [Dry Run] 将标记文章 {article_id} 为完成状态")
+
+        all_downloaded = (downloaded == total)
+
+        logger.info(f"专栏 {course_id}: {downloaded}/{total} 篇文章已下载")
+        if articles_marked > 0:
+            logger.info(f"  新标记 {articles_marked} 篇文章为完成状态")
+
+        if all_downloaded:
+            if not dry_run:
+                marked = self.mark_course_done(course_id)
+            else:
+                logger.info(f"  [Dry Run] 将标记专栏 {course_id} 为完成状态")
+                marked = True
+        else:
+            marked = False
+            missing = total - downloaded
+            logger.warning(f"  专栏 {course_id} 还有 {missing} 篇文章未下载")
+
+        return {
+            "course_id": course_id,
+            "total": total,
+            "downloaded": downloaded,
+            "all_downloaded": all_downloaded,
+            "marked": marked,
+            "articles_marked": articles_marked
+        }
+
+    def run(self, dry_run: bool = False, specific_course: str = None) -> None:
+        """运行检查和标记"""
+        if specific_course:
+            logger.info(f"只检查专栏: {specific_course}")
+            courses = [
+                c for c in self.get_all_courses() if c["id"] == specific_course
+            ]
+        else:
+            logger.info("检查所有专栏...")
+            courses = self.get_all_courses()
+
+        if not courses:
+            logger.warning("没有找到任何专栏")
+            return
+
+        logger.info(f"共找到 {len(courses)} 个专栏")
+        logger.info("=" * 80)
+
+        stats = {
+            "total": len(courses),
+            "all_downloaded": 0,
+            "marked": 0,
+            "already_done": 0,
+            "not_ready": 0,
+            "total_articles_marked": 0
+        }
+
+        for course in courses:
+            course_id = course["id"]
+            title = course["title"]
+            current_done = course["done"]
+
+            logger.info(f"\n检查: {title} ({course_id})")
+
+            if current_done == 1:
+                logger.info(f"  专栏已经是完成状态，跳过")
+                stats["already_done"] += 1
+                # 即使专栏已完成，也要检查并标记已下载的文章
+                result = self.check_and_mark_course(course_id, dry_run)
+                stats["total_articles_marked"] += result["articles_marked"]
+            else:
+                result = self.check_and_mark_course(course_id, dry_run)
+
+                if result["all_downloaded"]:
+                    stats["all_downloaded"] += 1
+                    if result["marked"]:
+                        stats["marked"] += 1
+                else:
+                    stats["not_ready"] += 1
+
+                stats["total_articles_marked"] += result["articles_marked"]
+
+        logger.info("\n" + "=" * 80)
+        logger.info("统计结果:")
+        logger.info(f"  总计专栏数: {stats['total']}")
+        logger.info(f"  专栏已完成(跳过): {stats['already_done']}")
+        logger.info(f"  文章全部下载: {stats['all_downloaded']}")
+        logger.info(f"  新标记专栏完成: {stats['marked']}")
+        logger.info(f"  新标记文章完成: {stats['total_articles_marked']}")
+        logger.info(f"  专栏未完成: {stats['not_ready']}")
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="检查专栏文章是否全部下载完成，并标记完成状态"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="试运行，不实际修改数据库"
+    )
+    parser.add_argument(
+        "--course",
+        type=str,
+        help="只检查指定的专栏ID"
+    )
+    parser.add_argument(
+        "--db",
+        type=str,
+        default="storage/hackbook.db",
+        help="数据库文件路径 (默认: storage/hackbook.db)"
+    )
+
+    args = parser.parse_args()
+
+    marker = CourseDoneMarker(db_path=args.db)
+    marker.run(dry_run=args.dry_run, specific_course=args.course)
+
+
+if __name__ == "__main__":
+    main()

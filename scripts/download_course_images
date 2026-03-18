@@ -1,0 +1,285 @@
+#!/usr/bin/env python3
+"""
+下载hackbook.db中course表的图片并更新image字段
+功能：
+1. 从数据库读取所有course的image字段
+2. 下载图片到本地storage/images目录
+3. 更新数据库的image字段为本地路径
+
+用法:
+  python download_course_images.py [-c <concurrency>]
+  python download_course_images.py --concurrency 10
+"""
+
+import os
+import sys
+import sqlite3
+import random
+import time
+from pathlib import Path
+from urllib.parse import urljoin, urlparse, unquote
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+
+db_path = "./storage/hackbook.db"
+output_dir = "./storage/images"
+
+# 浏览器风格的 User-Agent 池
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
+]
+
+
+# 图片文件头签名（magic bytes）
+IMAGE_SIGNATURES = {
+    b"\xff\xd8\xff": "JPEG",
+    b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a": "PNG",
+    b"\x47\x49\x46\x38": "GIF",
+    b"\x42\x4d": "BMP",
+    b"\x52\x49\x46\x46": "WEBP",
+    b"\x49\x49\x2a\x00": "TIFF",
+    b"\x4d\x4d\x00\x2a": "TIFF",
+}
+
+
+def is_valid_image(content):
+    """检查文件内容是否为有效图片"""
+    for signature, format_name in IMAGE_SIGNATURES.items():
+        if content.startswith(signature):
+            return True, format_name
+    return False, None
+
+
+def is_image_content_type(content_type):
+    """检查Content-Type是否为图片类型"""
+    if not content_type:
+        return False
+    content_type = content_type.lower()
+    return content_type.startswith("image/")
+
+
+def sanitize_filename(filename):
+    """清理文件名，移除非法字符"""
+    filename = filename.split("?")[0]
+    filename = re.sub(r'[<>:"/\\|?*]', "", filename)
+    filename = unquote(filename)
+    if not filename or "." not in filename:
+        filename = "image.jpg"
+    return filename
+
+
+def get_unique_filename(directory, filename):
+    """获取唯一的文件名，避免重复"""
+    import re
+
+    base_path = Path(directory) / filename
+    if not base_path.exists():
+        return filename
+
+    stem = base_path.stem
+    suffix = base_path.suffix
+    counter = 1
+
+    while True:
+        new_filename = f"{stem}_{counter}{suffix}"
+        new_path = Path(directory) / new_filename
+        if not new_path.exists():
+            return new_filename
+        counter += 1
+
+
+def get_random_user_agent():
+    """随机获取一个浏览器 User-Agent"""
+    return random.choice(USER_AGENTS)
+
+
+def download_image(url, output_dir, timeout=30, file_lock=None):
+    """下载图片到本地"""
+    try:
+        parsed = urlparse(url)
+        filename = sanitize_filename(os.path.basename(parsed.path) or "image.jpg")
+
+        if file_lock:
+            with file_lock:
+                filename = get_unique_filename(output_dir, filename)
+        else:
+            filename = get_unique_filename(output_dir, filename)
+
+        output_path = Path(output_dir) / filename
+
+        # 如果图片已存在，直接使用
+        if output_path.exists():
+            # 检查文件是否为有效图片
+            try:
+                content = output_path.read_bytes()
+                is_valid, format_name = is_valid_image(content)
+                if is_valid:
+                    print(f"    ⏭️  图片已存在，直接使用: {filename}")
+                    return url, filename, format_name
+                else:
+                    print(f"    ⚠️  已存在文件不是有效图片，将重新下载")
+            except Exception as e:
+                print(f"    ⚠️  读取已存在文件失败: {e}，将重新下载")
+
+        headers = {
+            "User-Agent": get_random_user_agent(),
+            "Accept": "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Referer": f"{parsed.scheme}://{parsed.netloc}",
+            "DNT": "1",
+        }
+
+        response = requests.get(url, timeout=timeout, stream=True, headers=headers)
+        response.raise_for_status()
+
+        content_type = response.headers.get("Content-Type", "")
+        if not is_image_content_type(content_type):
+            print(f"    ❌ Content-Type不是图片: {content_type}")
+            return None
+
+        content = response.content
+
+        is_valid, format_name = is_valid_image(content)
+        if not is_valid:
+            print(f"    ❌ 文件头不是有效图片格式")
+            return None
+
+        if file_lock:
+            with file_lock:
+                output_path.write_bytes(content)
+        else:
+            output_path.write_bytes(content)
+
+        return url, filename, format_name
+
+    except requests.RequestException as e:
+        print(f"    ❌ 下载失败: {e}")
+        return None
+
+
+def get_courses(db_path):
+    """从数据库获取所有课程信息"""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, image FROM course")
+    courses = cursor.fetchall()
+    conn.close()
+    return courses
+
+
+def update_course_image(db_path, course_id, new_image_path):
+    """更新课程图片路径"""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE course SET image = ? WHERE id = ?", (new_image_path, course_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def main():
+    max_workers = 5
+
+    # 解析命令行参数
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] in ("-c", "--concurrency"):
+            if i + 1 < len(args):
+                max_workers = int(args[i + 1])
+                i += 2
+            else:
+                print(f"错误: {args[i]} 需要参数")
+                sys.exit(1)
+        elif args[i] in ("-h", "--help"):
+            print("课程图片下载脚本")
+            print("用法: python download_course_images.py [选项]")
+            print("")
+            print("选项:")
+            print("  -c, --concurrency <num>  设置并发度 (默认: 5)")
+            print("  -h, --help               显示此帮助信息")
+            sys.exit(0)
+        else:
+            print(f"错误: 未知参数 {args[i]}")
+            sys.exit(1)
+
+    # 检查数据库
+    if not Path(db_path).exists():
+        print(f"错误: 数据库文件不存在: {db_path}")
+        sys.exit(1)
+
+    # 创建输出目录
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # 获取所有课程
+    print("正在从数据库读取课程信息...")
+    courses = get_courses(db_path)
+    print(f"找到 {len(courses)} 个课程\n")
+
+    # 创建锁
+    file_lock = Lock()
+
+    total_downloaded = 0
+    total_failed = 0
+
+    # 使用线程池并发下载
+    print(f"开始下载，并发度: {max_workers}\n")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_course = {}
+
+        for course_id, image_url in courses:
+            if not image_url or not image_url.startswith("http"):
+                print(f"⏭️  跳过 {course_id}: 无效的图片URL")
+                total_failed += 1
+                continue
+
+            future = executor.submit(
+                download_image,
+                url=image_url,
+                output_dir=output_dir,
+                file_lock=file_lock,
+            )
+            future_to_course[future] = (course_id, image_url)
+
+        for future in as_completed(future_to_course):
+            course_id, image_url = future_to_course[future]
+            try:
+                result = future.result()
+                if result:
+                    _, filename, format_name = result
+                    new_path = f"/images/{filename}"
+
+                    # 更新数据库
+                    update_course_image(db_path, course_id, new_path)
+
+                    print(f"✅ {course_id}: {filename} ({format_name})")
+                    total_downloaded += 1
+                else:
+                    print(f"❌ {course_id}: 下载失败 - {image_url}")
+                    total_failed += 1
+            except Exception as e:
+                print(f"❌ {course_id}: 异常 - {e}")
+                total_failed += 1
+
+    print(f"\n{'=' * 50}")
+    print(f"下载完成！")
+    print(f"- 成功: {total_downloaded}")
+    print(f"- 失败: {total_failed}")
+    print(f"- 总数: {len(courses)}")
+    print(f"- 图片目录: {Path(output_dir).absolute()}")
+    print(f"{'=' * 50}")
+
+
+if __name__ == "__main__":
+    import re
+
+    main()

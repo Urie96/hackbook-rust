@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""
+HTML图片下载脚本
+功能：
+1. 自动处理content文件夹中的所有HTML文件
+2. 提取所有img标签的src属性
+3. 下载图片到本地image目录
+4. 修改HTML中的src为本地路径
+5. 验证下载的是真实图片（非HTML网页）
+6. 并发下载，可配置并发度
+7. 支持代理设置
+
+用法:
+  python download_images.py [-c <concurrency>] [-b <base_url>]
+  python download_images.py --concurrency 10
+  python download_images.py -c 3 --base-url https://example.com
+"""
+
+import os
+import re
+import sys
+import random
+import time
+from pathlib import Path
+from urllib.parse import urljoin, urlparse, unquote
+import requests
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+
+
+# 浏览器风格的 User-Agent 池
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
+]
+
+
+# 图片文件头签名（magic bytes）
+IMAGE_SIGNATURES = {
+    b"\xff\xd8\xff": "JPEG",
+    b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a": "PNG",
+    b"\x47\x49\x46\x38": "GIF",
+    b"\x42\x4d": "BMP",
+    b"\x52\x49\x46\x46": "WEBP",
+    b"\x49\x49\x2a\x00": "TIFF",
+    b"\x4d\x4d\x00\x2a": "TIFF",
+}
+
+
+def is_valid_image(content):
+    """检查文件内容是否为有效图片"""
+    # 检查文件头签名
+    for signature, format_name in IMAGE_SIGNATURES.items():
+        if content.startswith(signature):
+            return True, format_name
+    return False, None
+
+
+def is_image_content_type(content_type):
+    """检查Content-Type是否为图片类型"""
+    if not content_type:
+        return False
+    content_type = content_type.lower()
+    return content_type.startswith("image/")
+
+
+def sanitize_filename(filename):
+    """清理文件名，移除非法字符"""
+    # 移除URL查询参数
+    filename = filename.split("?")[0]
+    # 移除特殊字符
+    filename = re.sub(r'[<>:"/\\|?*]', "", filename)
+    # URL解码
+    filename = unquote(filename)
+    # 如果为空或没有扩展名，给一个默认名
+    if not filename or "." not in filename:
+        filename = "image.jpg"
+    return filename
+
+
+def get_unique_filename(directory, filename):
+    """获取唯一的文件名，避免重复"""
+    base_path = Path(directory) / filename
+    if not base_path.exists():
+        return filename
+
+    stem = base_path.stem
+    suffix = base_path.suffix
+    counter = 1
+
+    while True:
+        new_filename = f"{stem}_{counter}{suffix}"
+        new_path = Path(directory) / new_filename
+        if not new_path.exists():
+            return new_filename
+        counter += 1
+
+
+def get_random_user_agent():
+    """随机获取一个浏览器 User-Agent"""
+    return random.choice(USER_AGENTS)
+
+
+def download_image(
+    url,
+    output_dir,
+    timeout=30,
+    file_lock=None,
+):
+    """下载图片到本地"""
+    try:
+        # 解析URL获取文件名
+        parsed = urlparse(url)
+        filename = sanitize_filename(os.path.basename(parsed.path) or "image.jpg")
+
+        # 使用锁来确保文件名唯一性
+        if file_lock:
+            with file_lock:
+                filename = get_unique_filename(output_dir, filename)
+        else:
+            filename = get_unique_filename(output_dir, filename)
+
+        output_path = Path(output_dir) / filename
+
+        # 使用浏览器风格的请求头，避免被识别为爬虫
+        headers = {
+            "User-Agent": get_random_user_agent(),
+            "Accept": "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Referer": f"{parsed.scheme}://{parsed.netloc}",
+            "DNT": "1",
+        }
+
+        # 下载图片
+        response = requests.get(url, timeout=timeout, stream=True, headers=headers)
+        response.raise_for_status()
+
+        # 检查Content-Type
+        content_type = response.headers.get("Content-Type", "")
+        if not is_image_content_type(content_type):
+            print(f"    ❌ Content-Type不是图片: {content_type}")
+            return None
+
+        # 读取内容
+        content = response.content
+
+        # 检查文件头是否为有效图片
+        is_valid, format_name = is_valid_image(content)
+        if not is_valid:
+            print(f"    ❌ 文件头不是有效图片格式")
+            # 检查是否为HTML
+            content_preview = content[:100].decode("utf-8", errors="ignore")
+            if "<html" in content_preview.lower() or "<!DOCTYPE" in content_preview:
+                print(f"    ⚠️  检测到返回的是HTML而非图片（可能IP被封禁）")
+            return None
+
+        # 使用锁保护文件写入
+        if file_lock:
+            with file_lock:
+                output_path.write_bytes(content)
+        else:
+            output_path.write_bytes(content)
+
+        return url, filename, format_name
+
+    except requests.RequestException as e:
+        return None
+
+
+def is_absolute_url(url):
+    """判断是否是绝对URL"""
+    return url.startswith(("http://", "https://"))
+
+
+def process_html(html_file, output_dir="image", base_url=None, max_workers=5):
+    """处理HTML文件"""
+    # 创建输出目录
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # 读取HTML文件
+    html_path = Path(html_file)
+    print(f"  开始处理: {html_path}")
+    html_content = html_path.read_text(encoding="utf-8")
+
+    # 解析HTML
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    # 查找所有img标签
+    img_tags = soup.find_all("img")
+    print(f"  找到 {len(img_tags)} 个img标签")
+
+    # 收集需要下载的URL
+    urls_to_download = []
+    for img in img_tags:
+        src = img.get("src")
+        if not src:
+            continue
+
+        # 处理data URI（跳过）
+        if src.startswith("data:"):
+            continue
+
+        # 处理相对URL
+        if not is_absolute_url(src) and base_url:
+            src = urljoin(base_url, src)
+
+        urls_to_download.append((img, src))
+
+    print(f"  需要下载 {len(urls_to_download)} 张图片")
+    print(f"  并发度: {max_workers}")
+
+    # 创建锁
+    file_lock = Lock()
+    html_lock = Lock()
+
+    download_count = 0
+
+    # 使用线程池并发下载
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 提交所有下载任务
+        future_to_img = {}
+        for img, url in urls_to_download:
+            future = executor.submit(
+                download_image,
+                url=url,
+                output_dir=output_dir,
+                file_lock=file_lock,
+            )
+            future_to_img[future] = (img, url)
+
+        # 处理完成的任务
+        for future in as_completed(future_to_img):
+            img, url = future_to_img[future]
+            try:
+                result = future.result()
+                if result:
+                    _, filename, format_name = result
+                    print(f"    ✅ 下载成功: {filename} ({format_name})")
+
+                    # 修改src为本地路径
+                    with html_lock:
+                        img["src"] = f"/images/{filename}"
+                        download_count += 1
+                        # 下载成功后立即原地保存
+                        html_path.write_text(str(soup), encoding="utf-8")
+                        print(f"  已原地更新: {html_path}")
+            except Exception as e:
+                print(f"    ❌ 下载失败: {url} - {e}")
+
+    return download_count, len(img_tags)
+
+
+def main():
+    """主入口 - 处理content文件夹中的所有HTML文件"""
+    content_dir = Path("./storage/contents")
+    output_dir = "./storage/images"
+    base_url = None
+    max_workers = 5  # 默认并发度为5
+
+    # 解析命令行参数
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] in ("-c", "--concurrency"):
+            if i + 1 < len(args):
+                max_workers = int(args[i + 1])
+                i += 2
+            else:
+                print(f"错误: {args[i]} 需要参数")
+                sys.exit(1)
+        elif args[i] in ("-b", "--base-url"):
+            if i + 1 < len(args):
+                base_url = args[i + 1]
+                i += 2
+            else:
+                print(f"错误: {args[i]} 需要参数")
+                sys.exit(1)
+        elif args[i] in ("-h", "--help"):
+            print("HTML图片下载脚本")
+            print("用法: python download_images.py [选项]")
+            print("")
+            print("选项:")
+            print("  -c, --concurrency <num>  设置并发度 (默认: 5)")
+            print("  -b, --base-url <url>     设置基础URL用于处理相对路径")
+            print("  -h, --help               显示此帮助信息")
+            print("")
+            print("示例:")
+            print("  python download_images.py -c 10")
+            print("  python download_images.py -c 3 -b https://example.com")
+            sys.exit(0)
+        else:
+            print(f"错误: 未知参数 {args[i]}")
+            print("使用 -h 查看帮助")
+            sys.exit(1)
+
+    if not content_dir.exists():
+        print(f"错误: content 目录不存在")
+        sys.exit(1)
+
+    # 查找所有HTML文件
+    html_files = list(content_dir.glob("*.html"))
+    if not html_files:
+        print(f"错误: content 目录中没有找到HTML文件")
+        sys.exit(1)
+
+    print(f"找到 {len(html_files)} 个HTML文件\n")
+
+    # 创建图片输出目录
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    total_downloaded = 0
+    total_images = 0
+
+    # 处理每个HTML文件
+    for i, html_file in enumerate(html_files, 1):
+        print(f"\n[{i}/{len(html_files)}] 处理: {html_file.name}")
+        downloaded, images = process_html(html_file, output_dir, base_url, max_workers)
+        total_downloaded += downloaded
+        total_images += images
+
+    print(f"\n{'=' * 50}")
+    print(f"全部完成！")
+    print(f"- 处理文件: {len(html_files)}")
+    print(f"- 下载图片: {total_downloaded}/{total_images}")
+    print(f"- 并发度: {max_workers}")
+    print(f"- 图片目录: {Path(output_dir).absolute()}")
+    print(f"{'=' * 50}")
+
+
+if __name__ == "__main__":
+    main()
